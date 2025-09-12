@@ -1,0 +1,6 @@
+/authorzed_Users/*.json
+/.env
+/__pycache__
+/downloads/*
+/tele_bot_log/logs.txt
+/KeyLoger.txt
