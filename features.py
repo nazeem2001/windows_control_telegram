@@ -309,7 +309,7 @@ class features:
                 audio_data = speach.record(source)
                 # recognize (convert from speech to text)
                 text = speach.recognize_google(audio_data)
-            os.remove(f"downloads/{fname}.oga")
+            os.remove(f"downloads/{fname}.wav")
             os.remove(f"downloads/{fname}")
         except sr.UnknownValueError:
             self.telegram_bot.sendMessage(
@@ -318,9 +318,7 @@ class features:
             os.remove(f"downloads/{fname}.wav")
             os.remove(f"downloads/{fname}")
             print('deleted')
-            return
-        os.remove(f"downloads/{fname}.wav")
-        os.remove(f"downloads/{fname}")
+            return False , text
         print('deleted')
         print(text)
         self.telegram_bot.sendMessage(chat_id, f'you said {text}')
