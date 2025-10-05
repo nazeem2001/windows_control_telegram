@@ -1,3 +1,4 @@
+import socket
 from werkzeug.utils import safe_join
 import live_webserver as lw
 import os
@@ -14,7 +15,8 @@ from pynput.keyboard import Controller as key
 import speech_recognition as sr
 import pyttsx3
 from pyngrok import ngrok
-import ollama
+if(os.getenv("CHAT_BOT_ENABLED") != "False"):
+    import ollama
 
 
 class features:
@@ -68,6 +70,9 @@ class features:
         self.ngrok_token = os.getenv("NGROK_TOKEN")
         self.pronoun = os.getenv("PRONOUN")
         self.ffmpegPathPrefix = os.getenv("FFMPEG_PATH_PREFIX")
+        self.rdp_port = os.getenv("RDP_PORT", "3389")
+        self.rdp_active = False
+        self.chat_bot_enabled=os.getenv("CHAT_BOT_ENABLED", "True").lower() in ("true", "1", "t")
         self.chat_id_file = 0
         self.photo_name = 'photo.png'
         self.authorzed_users = 'authorzed_Users/authorzed_Users.json'
@@ -123,6 +128,9 @@ class features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
+        if(self.rdp_active):
+            self.telegram_bot.sendMessage(chat_id, f"Cannot start/stop live server as RDP tunnel is running on the server")
+            return None
         if self.server_thread_state == "ON" and not self.video_State and not self.screen_State:
             lw.stop_server()
             ngrok.kill()
@@ -576,6 +584,10 @@ here is log''')
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
+        if self.chat_bot_enabled == False:
+            self.telegram_bot.sendMessage(
+                chat_id, "Chat bot is disabled. Please enable it to use this feature.")
+            return
         user_name = f"{first_name} {last_name}"
         prompt = f"{user_name} says: {' '.join(list_command[1:])}"
 
@@ -651,3 +663,33 @@ here is log''')
         else:
             self.telegram_bot.sendMessage(
                 self.admin_chat_id, "User not found in the authorized list.")
+
+    def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name):
+        # Set up ngrok tunnel
+        if(self.rdp_active):
+            ngrok.kill()
+            self.rdp_active = False
+            self.telegram_bot.sendMessage(chat_id, f"RDP tunnel stopped")
+            if(not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+                self.telegram_bot.sendMessage(self.admin_chat_id, f'''RDP tunnel stopped by {first_name} {last_name}''')
+            return
+        elif(self.video_State):
+            self.telegram_bot.sendMessage(chat_id, f"Cannot start RDP tunnel as other video feed is running on the server")
+            return
+        elif(self.screen_State):
+                self.telegram_bot.sendMessage(chat_id, f"Cannot start RDP tunnel as other screen feed is running on the server")
+                return
+        ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
+
+        self.rdp_active = True
+        # Get tunnel information
+        tunnel_domain = ngrok_tunnel.public_url.split("/")[2].split(":")[0]
+        #get ip address from domain:port
+        print(ngrok_tunnel.public_url.split("/"))
+        tunnel_ip = socket.gethostbyname(tunnel_domain)
+        tunnel_port = ngrok_tunnel.public_url.split(":")[2]
+        self.telegram_bot.sendMessage(chat_id, f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`", parse_mode='MarkdownV2')
+        if(not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+            self.telegram_bot.sendMessage(self.admin_chat_id, f'''RDP tunnel started by {first_name} {last_name}''')
+           
+            

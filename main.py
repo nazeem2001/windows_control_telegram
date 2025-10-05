@@ -54,6 +54,7 @@ def replymessage(first_name, last_name, command, chat_id):
                 "chat": feature.run_language_model,
                 "list": feature.list_users,
                 "kick": feature.kick_user,
+                "rdp": feature.start_stop_rdp_tunnel,
             }
             if feature.chat_mode.get(chat_id) == 'ai':
                 command_handlers['chat'](
@@ -139,6 +140,10 @@ def action(msg):
     if key == "text":
         if command in Commands_slash:
             if command == Commands_slash[0]:
+                if(feature.chat_bot_enabled==False):
+                    telegram_bot.sendMessage(
+                        chat_id, "Chat bot is disabled. Please enable it to use this feature.")
+                    return
                 set_chat_mode(msg, True)
             elif command == Commands_slash[1]:
                 set_chat_mode(msg, False)
