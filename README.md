@@ -2,15 +2,16 @@
 
 ## Telegram Commands:
 
-- /ai: Switch to AI chat mode.
-- /non_ai: Switch to non-AI chat mode.
-- send <file_path>: Send a file to the bot.
-- video: Start video streaming.
-- screen: Start screen streaming.
-- speak <text>: Convert text to speech.
-- keylog: Start or stop the key logger.
-- list: List all authorized users.
-- kick <chat_id>: Remove a user from the authorized list.
+- `/ai`: Switch to AI chat mode.
+- `/non_ai`: Switch to non-AI chat mode.
+- `send <file_path>`: Send a file to the bot.
+- `video`: Start video streaming.
+- `screen`: Start screen streaming.
+- `speak <text>`: Convert text to speech.
+- `keylog`: Start or stop the key logger.
+- `list`: List all authorized users.
+- `kick <chat_id>`: Remove a user from the authorized list.
+- `rdp`: starts a remote desktop tunnel to access the PC via internet
 
 ## Features
 
@@ -20,6 +21,7 @@
 - Key Logging: Start and stop a key logger to monitor keystrokes.
 - Speech Recognition: Convert voice messages to text.
 - Text-to-Speech: Convert text commands to speech.
+- remote desktop tunnel via ngRok
 
 `pip install -r requirements.txt`
 

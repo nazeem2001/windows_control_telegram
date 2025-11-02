@@ -6,12 +6,14 @@ import telepot
 from urllib import request as open_web
 import time
 import features
+import json
 
 load_dotenv()
 api_key = os.getenv("API_KEY")
 telegram_bot = telepot.Bot(api_key)
 feature = features.features(telegram_bot)
 Commands_slash = ['/ai', '/non_ai']
+# telegram_bot.
 
 
 def replymessage(first_name, last_name, command, chat_id):
@@ -39,40 +41,9 @@ def replymessage(first_name, last_name, command, chat_id):
                 break
         if authorized:
             list_command = command.split()
-            cmd = list_command[0].lower()
+            feature.execute_chat_command(
+                chat_id, command, list_command, first_name, last_name)
 
-            command_handlers = {
-                "send": feature.send,
-                "video": feature.video,
-                "screen": feature.screen,
-                "types": feature.keyboard_type,
-                "speak": feature.speak,
-                "screenshot": feature.take_screenshot,
-                "stop": feature.kill_task,
-                "photo": feature.take_photo,
-                "keylog": feature.key_logger,
-                "chat": feature.run_language_model,
-                "list": feature.list_users,
-                "kick": feature.kick_user,
-                "rdp": feature.start_stop_rdp_tunnel,
-            }
-            if feature.chat_mode.get(chat_id) == 'ai':
-                command_handlers['chat'](
-                    chat_id, command, list_command, first_name, last_name)
-            elif cmd in command_handlers:
-                command_handlers[cmd](
-                    chat_id, command, list_command, first_name, last_name)
-            elif chat_id == feature.chat_id_file and cmd == feature.random_f:
-                feature.save_file_in_fin(chat_id)
-            else:
-                process = Popen(command, shell=True,
-                                stdout=PIPE, stderr=PIPE, text=True)
-                stdout, stderr = process.communicate()
-                if process.returncode != 0:
-                    telegram_bot.sendMessage(chat_id, "INVALID Command")
-                else:
-                    telegram_bot.sendMessage(chat_id, stdout)
-                    telegram_bot.sendMessage(chat_id, 'ok')
         else:
             feature.send_first_auth_code(chat_id, name)
     else:
@@ -108,7 +79,7 @@ def set_chat_mode(msg, mode):
                      chat_id for user in feature.auth_list['authorized'])
 
     if authorized:
-        feature.setChatMode(chat_id, mode)
+        feature.set_chat_mode(chat_id, mode)
         mode_text = "AI" if mode else "non-AI"
         telegram_bot.sendMessage(chat_id, f"Chat mode set to {mode_text}.")
     else:
@@ -116,7 +87,7 @@ def set_chat_mode(msg, mode):
                      ['last_name'], msg[key_list[0]], chat_id)
 
 
-def action(msg):
+def action(msg):  # NOSONAR
     """
     Handles incoming messages from the Telegram bot and determines the type of message.
 
@@ -127,7 +98,10 @@ def action(msg):
         None
     """
     print(feature.auth_list)
-
+    print(json.dumps(msg, indent=4))
+    if 'data' in msg:
+        feature.reply_button(msg)
+        return
     chat_id = msg['chat']['id']
     first_name = msg['chat']['first_name']
     last_name = msg['chat']['last_name']
@@ -140,7 +114,7 @@ def action(msg):
     if key == "text":
         if command in Commands_slash:
             if command == Commands_slash[0]:
-                if(feature.chat_bot_enabled==False):
+                if (feature.chat_bot_enabled == False):
                     telegram_bot.sendMessage(
                         chat_id, "Chat bot is disabled. Please enable it to use this feature.")
                     return
