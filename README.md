@@ -1,5 +1,6 @@
 # Windows cmd telegram
 
+
 ## Telegram Commands:
 
 - `/ai`: Switch to AI chat mode.
@@ -13,15 +14,18 @@
 - `kick <chat_id>`: Remove a user from the authorized list.
 - `rdp`: starts a remote desktop tunnel to access the PC via internet
 
+Note: Prefix any command with `>` to bypass NLP processing and execute the command directly (e.g., `>send file.txt`)
+
 ## Features
 
 - AI and Non-AI Chat Modes: Switch between AI-powered and rule-based chat modes using /ai and /non_ai commands.
+- Intelligent Command Recognition: Uses machine learning (Naive Bayes with TF-IDF) to understand natural language commands and confirm ambiguous requests.
 - Video and Screen Streaming: Stream video from your webcam or captureyour screen.
 - File Management: Send and receive files through the bot.
 - Key Logging: Start and stop a key logger to monitor keystrokes.
 - Speech Recognition: Convert voice messages to text.
 - Text-to-Speech: Convert text commands to speech.
-- remote desktop tunnel via ngRok
+- Remote Desktop Access: Secure remote desktop tunnel via ngRok
 
 `pip install -r requirements.txt`
 
