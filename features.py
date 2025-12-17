@@ -189,7 +189,7 @@ class Features:
                            text=True).communicate()[0]
             await bot.send_message(chat_id=self.admin_chat_id, text=messag, reply_markup=self.reply_keyboard)
             i = i - 1
-            asyncio.sleep(.5)
+            await asyncio.sleep(1)
 
     async def live_server(self, chat_id, first_name, last_name, context):
         """
