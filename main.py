@@ -155,9 +155,9 @@ async def start_bot():
                     filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
 
+
     # Send test message
     await feature.test_message_async(app.bot)
-
     # Start the bot
     await app.initialize()
     await app.start()

