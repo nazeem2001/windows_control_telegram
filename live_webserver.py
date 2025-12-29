@@ -7,7 +7,7 @@ from werkzeug.serving import make_server
 import threading
 import time
 import requests
-import pyaudio
+
 import base64
 from flask_socketio import SocketIO, emit
 
@@ -19,44 +19,7 @@ camera = cv2.VideoCapture(0)
 cam_on = False
 count = 0
 
-def gen_header(sampleRate, bitsPerSample, channels, samples):
-    """
-    Generates a WAV file header for audio streaming.
 
-    Args:
-        sampleRate (int): The sample rate of the audio.
-        bitsPerSample (int): The number of bits per audio sample.
-        channels (int): The number of audio channels.
-        samples (int): The number of audio samples.
-
-    Returns:
-        bytes: The generated WAV file header.
-    """
-    datasize = 10240000
-    o = bytes("RIFF", 'ascii')
-    o += (datasize + 36).to_bytes(4, 'little')
-    o += bytes("WAVE", 'ascii')
-    o += bytes("fmt ", 'ascii')
-    o += (16).to_bytes(4, 'little')
-    o += (1).to_bytes(2, 'little')
-    o += (channels).to_bytes(2, 'little')
-    o += (sampleRate).to_bytes(4, 'little')
-    o += (sampleRate * channels * bitsPerSample // 8).to_bytes(4, 'little')
-    o += (channels * bitsPerSample // 8).to_bytes(2, 'little')
-    o += (bitsPerSample).to_bytes(2, 'little')
-    o += bytes("data", 'ascii')
-    o += (datasize).to_bytes(4, 'little')
-    return o
-
-
-FORMAT = pyaudio.paInt16
-CHUNK = 1024
-RATE = 44100
-bitsPerSample = 16
-CHANNELS = 1
-wav_header = gen_header(RATE, bitsPerSample, CHANNELS, CHUNK)
-audio = pyaudio.PyAudio()
-stream = ''
 
 @socketio.on("video")
 def gen_frames():
@@ -133,23 +96,6 @@ def disconnect():
         camera = cv2.VideoCapture(0)
         cam_on = False
 
-@app.route('/audio_unlim')
-def audio_unlim():
-    """
-    Streams audio indefinitely.
-
-    Returns:
-        Response: The audio stream response.
-    """
-    def sound():
-        data = wav_header
-        data += stream.read(CHUNK)
-        yield (data)
-        while True:
-            data = stream.read(CHUNK)
-            yield (data)
-
-    return Response(sound(), mimetype="audio/x-wav")
 
 @app.route('/stop')
 def stop():
