@@ -155,6 +155,9 @@ class Features:
             "kick": "did you mean to kick an authorized user?",
             "rdp": "did you mean to start/stop RDP tunnel?",
         }
+        
+        ngrok.set_auth_token(self.ngrok_token)
+        
         while not file_found:
             try:
                 with open(self.authorzed_users) as f:
