@@ -20,7 +20,7 @@ import joblib
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 import asyncio
-
+from chains import olamaChain, ttsChain
 if (os.getenv("CHAT_BOT_ENABLED") != "False"):
     import ollama
 
@@ -155,9 +155,9 @@ class Features:
             "kick": "did you mean to kick an authorized user?",
             "rdp": "did you mean to start/stop RDP tunnel?",
         }
-        
+
         ngrok.set_auth_token(self.ngrok_token)
-        
+
         while not file_found:
             try:
                 with open(self.authorzed_users) as f:
@@ -455,7 +455,7 @@ class Features:
         speak.say(command[x:])
         speak.runAndWait()
 
-    def save_file_in_fin(self, chat_id):
+    async def save_file_in_fin(self, chat_id):
         """
         Saves the file content in the specified location.
 
@@ -466,7 +466,7 @@ class Features:
             f.write(self.fin.content)
         self.chat_id_file = 0
         self.fin = ""
-        self.telegram_bot.send_message(chat_id, f'file saved as {self.fname}')
+        await self.telegram_bot.send_message(chat_id, f'file saved as {self.fname}')
         self.fname = ""
         self.file_message_id = "aa"
 
@@ -714,7 +714,7 @@ here is log''')
             await self.command_handlers[self.nlp_model.classes_.tolist()[predictons.argmax()]](
                 chat_id, command, list_command, first_name, last_name, context)
 
-    async def execute_chat_command_async(self, chat_id, command, list_command, first_name, last_name, context, reply=False):
+    async def execute_chat_command_async(self, chat_id, command, list_command, first_name, last_name, context, reply=False, is_audio=False):
         """
         Executes a chat command based on the given command and list of command arguments.
 
@@ -726,7 +726,7 @@ here is log''')
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
             reply (bool, optional): If True, the command is a reply to a previous message. Defaults to False.
-
+            is_audio (bool, optional): If True, the response should be in audio format. Defaults to False.
         Returns:
             None
         """
@@ -750,17 +750,17 @@ here is log''')
 
         if self.chat_mode.get(chat_id) == 'ai':
             await self.command_handlers['chat'](
-                chat_id, command, list_command, first_name, last_name, context)
+                chat_id, command, list_command, first_name, last_name, context, is_audio=is_audio)
         elif cmd in self.command_handlers:
             await self.command_handlers[cmd](
                 chat_id, command, list_command, first_name, last_name, context)
         elif chat_id == self.chat_id_file and cmd == self.random_f:
-            self.save_file_in_fin(chat_id)
+            await self.save_file_in_fin(chat_id)
         else:
             print('Executing as shell command')
             process = Popen(command, shell=True,
                             stdout=PIPE, stderr=PIPE, text=True)
-            stdout, stderr = process.communicate()
+            stdout, _ = process.communicate()
             if process.returncode != 0:
                 await context.bot.send_message(
                     chat_id=chat_id, text="INVALID Command")
@@ -794,7 +794,7 @@ here is log''')
             ), first_name, last_name, context, reply=True)
             self.nlp_classifier_output[chat_id] = {}
 
-    async def run_language_model(self, chat_id, command, list_command, first_name, last_name, context):
+    async def run_language_model(self, chat_id, command, list_command, first_name, last_name, context, is_audio=False):
         """
         Runs a language model to generate a response based on the user's input.
 
@@ -805,27 +805,51 @@ here is log''')
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
+            is_audio (bool, optional): Whether the response should be in audio format. Defaults to False.
+
+        Returns:
+            None
+
+        Raises:
+            None
         """
         if self.chat_bot_enabled == False:
             await context.bot.send_message(
                 chat_id=chat_id, text="Chat bot is disabled. Please enable it to use this feature.")
             return
         user_name = f"{first_name} {last_name}"
-        prompt = f"{user_name} says: {' '.join(list_command[1:])}"
+        prompt = f"{user_name} says: {command if self.get_chat_mode(chat_id) == 'ai' else ' '.join(list_command[1:])}"
 
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            *[
-                {"role": "user", "content": m}
-                for m in self.get_chat_history(chat_id)
-            ],
-            {"role": "user", "content": prompt}
-        ]
-        result = ollama.chat(model="llama3", messages=messages)
-        response = ''.join(result['message']['content'])
-        self.record_message(chat_id, f"User: {prompt}")
-        self.record_message(chat_id, f"Bot: {response}")
-        await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+        if not is_audio:
+            response = olamaChain.invoke({
+                "user_name": user_name,
+                "user_input": prompt,
+                "history": self.get_chat_history(chat_id)
+            })
+
+            self.record_message(chat_id, f"User: {prompt}")
+            self.record_message(chat_id, f"Bot: {response}")
+            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+        else:
+            print("Generating audio response...")
+            audio_file_path, response = ttsChain.invoke({
+                "user_name": user_name,
+                "user_input": prompt,
+                "history": self.get_chat_history(chat_id)
+            })
+            # ttsChain returns wav file path
+            # convert wav to ogg
+            convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{audio_file_path} downloads/{audio_file_path}.ogg'
+            process = Popen(convert_command, shell=True,
+                            stdout=PIPE, stderr=PIPE, text=True)
+            stdout, stderr = process.communicate()
+            if process.returncode != 0:
+                await context.bot.send_message(
+                    chat_id=chat_id, text="Error converting audio file.")
+                os.remove(f'downloads/{audio_file_path}')
+            else:
+                await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
+                os.remove(f'downloads/{audio_file_path}.ogg')
 
     async def list_users(self, chat_id, command, list_command, first_name, last_name, context):
         """

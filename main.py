@@ -12,7 +12,13 @@ import sys
 load_dotenv()
 api_key = os.getenv("API_KEY")
 # Initialize the bot application using python-telegram-bot
-app = ApplicationBuilder().token(api_key).build()
+app = (
+    ApplicationBuilder()
+    .token(api_key)
+    .connect_timeout(30)  # Time to establish connection
+    .read_timeout(30)    # Time to wait for data
+    .build()
+)
 feature = features.Features(app.bot)  # Pass the bot instance to features
 Commands_slash = ['/ai', '/non_ai']
 
@@ -120,12 +126,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'file_name': message.document.file_name
             }
 
-        speach_recon, command = await feature.download_file_async(msg_for_download, key,update, context)
+        speach_recon, command = await feature.download_file_async(msg_for_download, key, update, context)
+        
         if speach_recon is True:
             name = f'{first_name} {last_name}'
             list_command = command.split()
             await feature.execute_chat_command_async(
-                chat_id, command, list_command, first_name, last_name, context)
+                chat_id, command, list_command, first_name, last_name, context, is_audio=True)
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -154,7 +161,6 @@ async def start_bot():
     app.add_handler(MessageHandler(filters.TEXT | filters.VOICE |
                     filters.PHOTO | filters.VIDEO | filters.Document.ALL, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
-
 
     # Send test message
     await feature.test_message_async(app.bot)
