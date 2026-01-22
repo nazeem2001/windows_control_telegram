@@ -1,4 +1,5 @@
 import asyncio
+from multiprocessing import context
 import socket
 import telegram
 from werkzeug.utils import safe_join
@@ -833,31 +834,39 @@ here is log''')
             await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
         else:
             print("Generating audio response...")
-            audio_file_path, response = ttsChain.invoke({
+            audio_file_paths, response = ttsChain.invoke({
                 "user_name": user_name,
                 "user_input": prompt,
                 "history": self.get_chat_history(chat_id)
             })
             # ttsChain returns wav file path
             # convert wav to ogg
-            convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{audio_file_path} downloads/{audio_file_path}.ogg'
-            process = Popen(convert_command, shell=True,
-                            stdout=PIPE, stderr=PIPE, text=True)
-            stdout, stderr = process.communicate()
-            if process.returncode != 0:
-                await context.bot.send_message(
-                    chat_id=chat_id, text="Error converting audio file.")
+            for audio_file_path in audio_file_paths:
+                convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{audio_file_path} downloads/{audio_file_path}.ogg'
+                process = Popen(convert_command, shell=True,
+                                stdout=PIPE, stderr=PIPE, text=True)
+                stdout, stderr = process.communicate()
+                if process.returncode != 0:
+                    await context.bot.send_message(
+                        chat_id=chat_id, text="Error converting audio file.")
+                elif len(audio_file_paths) == 1:
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
+                    except BaseException as e:
+                        if (isinstance(e, telegram.error.BadRequest) and 'Message caption is too long' in str(e)) or 'Can\'t parse entities' in str(e):
+                            await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
+                            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+                        else:
+                            await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
+                    os.remove(f'downloads/{audio_file_path}.ogg')
                 os.remove(f'downloads/{audio_file_path}')
-            else:
-                try:
-                    await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
-                except BaseException as e:
-                    if (isinstance(e, telegram.error.BadRequest) and 'Message caption is too long' in str(e)) or 'Can\'t parse entities' in str(e):
-                        await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                        await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
-                    else:
-                        await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
-                os.remove(f'downloads/{audio_file_path}.ogg')
+            if (len(audio_file_paths) > 1):
+                for audio_file_path in audio_file_paths:
+                    await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
+                    os.remove(f'downloads/{audio_file_path}.ogg')
+                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+            self.record_message(chat_id, f"User: {prompt}")
+            self.record_message(chat_id, f"Bot: {response}")
 
     async def list_users(self, chat_id, command, list_command, first_name, last_name, context):
         """
