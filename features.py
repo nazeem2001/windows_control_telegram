@@ -868,6 +868,21 @@ here is log''')
             self.record_message(chat_id, f"User: {prompt}")
             self.record_message(chat_id, f"Bot: {response}")
 
+    def escape_markdown_v2(self, text):
+        """
+        Escapes special characters for Telegram MarkdownV2 format.
+
+        Args:
+            text (str): The text to escape.
+
+        Returns:
+            str: The escaped text.
+        """
+        special_chars = r'_*[]()~`>#+-=|{}.!'
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+
     async def list_users(self, chat_id, command, list_command, first_name, last_name, context):
         """
         Lists all authorized users and sends the list to the requesting user.
@@ -888,7 +903,8 @@ here is log''')
         for user in self.auth_list['authorized']:
             if user['chat_id'] is None or user['chat_id'] == int(self.admin_chat_id):
                 continue
-            user_list += f"Name: {user['Name']}, Chat ID:`{user['chat_id']}`\n"
+            escaped_name = self.escape_markdown_v2(user['Name'])
+            user_list += f"Name: '''{escaped_name}''', Chat ID:`{user['chat_id']}`\n"
             users_available = True
         await context.bot.send_message(
             chat_id=chat_id, text=user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
