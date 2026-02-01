@@ -72,7 +72,7 @@ def generate_audio(text, exaggeration, temperature, cfgw, min_p, top_p, repetiti
     return file_names, text
 
 
-llm = ChatOllama(model="llama3", keep_alive="0")
+llm = ChatOllama(model="llama3.1", keep_alive="0")
 
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", "You are a helpful assistant."),
