@@ -22,9 +22,14 @@ import joblib
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 import asyncio
-from chains import olamaChain, ttsChain
+from chains import create_agent_tts, llm, prompt_template, olamaChain, ttsChain, create_agent_text
+
+from models.tool_context import ToolContext
+from tool_config import build_tools
+import aiofiles
 if (os.getenv("CHAT_BOT_ENABLED") != "False"):
     import ollama
+# from langchain.agents import create_agent
 
 
 class Features:
@@ -70,6 +75,7 @@ class Features:
             telegram_bot: An instance of the Telegram bot.
         """
         load_dotenv()
+        self.un_authorized_message = "You are not authorized to use this command."
         self.nlp_model = joblib.load('text_classifier.joblib')
         self.admin_chat_id = os.getenv("ADMIN_CHAT_ID")
         self.api_key = os.getenv("API_KEY")
@@ -170,6 +176,18 @@ class Features:
                 data = {'authorized': [{'chat_id': None, 'Name': None}]}
                 with open(self.authorzed_users, 'w') as f:
                     json.dump(data, f, indent=2)
+
+    async def get_system_status(self, chat_id, command, command_list, first_name, last_name, context, is_form_self=False):
+        state = {'remote_tunnel': self.rdp_active, 'video_streaming': self.video_state,
+                 'screen_sharing': self.screen_state, 'nlp_state': self.no_nlp[chat_id]}
+        system_status_messages = ' Current System Status:\n - remote desktop: ' + \
+            ('ON' if state['remote_tunnel'] else 'OFF') + '\n - live video: ' + \
+            ('ON' if state['video_streaming'] else 'OFF') + '\n - screen sharing: ' + \
+            ('ON' if state['screen_sharing'] else 'OFF') + '\n - NLP: ' + \
+            ('ON' if state['nlp_state'] else 'OFF')
+        if not is_form_self:
+            await context.bot.send_message(chat_id=chat_id, text=f"System Status: {system_status_messages}")
+        return system_status_messages
 
     async def set_nlp_flag_async(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -456,6 +474,7 @@ class Features:
         x = len(command_list[0])
         speak.say(command[x:])
         speak.runAndWait()
+        return 'text spoken using system TTS engine'
 
     async def save_file_in_fin(self, chat_id):
         """
@@ -489,6 +508,7 @@ class Features:
         img.save('screen.png')
         await context.bot.send_photo(chat_id=chat_id, photo=open("screen.png", 'rb'))
         os.remove("screen.png")
+        return 'Screenshot taken and sent'
 
     async def kill_task(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -523,8 +543,17 @@ class Features:
             context: The context object from python-telegram-bot
         """
         keyboard = key()
-        x = len(command_list[0])
-        keyboard.type(command[x+1:])
+        # Extract the text to type from command_list (everything after the command name)
+        text_to_type = ' '.join(command_list[1:]) if len(
+            command_list) > 1 else ""
+
+        # Type character by character with small delays to handle long strings reliably
+        for char in text_to_type:
+            keyboard.type(char)
+            await asyncio.sleep(0.06)  # 10ms delay between characters
+
+        print(f"typed {text_to_type}")
+        return 'typed text with keyboard controller'
 
     async def take_photo(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -542,7 +571,7 @@ class Features:
         if not vod.isOpened():
             await context.bot.send_message(
                 chat_id=chat_id, text="No camera attached or accessible.")
-            return
+            return 'no camera found'
 
         ret, img = vod.read()
         vod.release()
@@ -552,8 +581,10 @@ class Features:
             await context.bot.send_photo(
                 chat_id=chat_id, photo=open(self.photo_name, 'rb'))
             os.remove(self.photo_name)
+            return 'photo taken and sent'
         else:
             await context.bot.send_message(chat_id=chat_id, text="Failed to capture image.")
+            return 'failed to capture image'
 
     async def key_logger(self, chat_id, command, command_list, first_name, last_name, context):
         """
@@ -591,6 +622,7 @@ here is log''')
             x.close()
             os.remove(self.key_log_file)
             self.logging = False
+            return 'key logger started' if self.logging else 'key logger stopped'
 
     async def send_first_auth_code_async(self, chat_id, name, context):
         """
@@ -651,9 +683,7 @@ here is log''')
             chat_id (int): The chat ID of the user.
             message (str): The message to be recorded.
         """
-        if chat_id not in self.chat_history:
-            self.chat_history[chat_id] = []
-        self.chat_history[chat_id].append(message)
+        self.chat_history[chat_id] = message
 
     def get_chat_history(self, chat_id):
         """
@@ -820,24 +850,44 @@ here is log''')
                 chat_id=chat_id, text="Chat bot is disabled. Please enable it to use this feature.")
             return
         user_name = f"{first_name} {last_name}"
-        prompt = f"{user_name} says: {command if self.get_chat_mode(chat_id) == 'ai' else ' '.join(list_command[1:])}"
+        promptn = f"{user_name} says: {command if self.get_chat_mode(chat_id) == 'ai' else ' '.join(list_command[1:])}"
+        system_status = await self.get_system_status(chat_id, command, list_command, first_name, last_name, context, True)
+        tool_ctx = ToolContext(
+            chat_id, first_name, last_name, context)
 
         if not is_audio:
-            response = olamaChain.invoke({
-                "user_name": user_name,
-                "user_input": prompt,
-                "history": self.get_chat_history(chat_id)
-            })
+            # response = olamaChain.invoke({
+            #     "user_name": user_name,
+            #     "user_input": prompt,
+            #     "history": self.get_chat_history(chat_id)
+            # })
 
-            self.record_message(chat_id, f"User: {prompt}")
-            self.record_message(chat_id, f"Bot: {response}")
+            agent = create_agent_Custom(
+                self, tool_ctx
+            )
+            # agent_prompt = prompt_template.invoke()
+
+            agent_response = await agent.ainvoke({
+                "user_name": user_name,
+                "user_input": promptn,
+                "history": self.get_chat_history(chat_id),
+                "system_status": system_status
+            })
+            response = agent_response['output']
+            print(agent_response)
+            print("Generated text response:", response)
+            self.record_message(
+                chat_id, agent_response['response']['messages'])
             await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
         else:
             print("Generating audio response...")
-            audio_file_paths, response = ttsChain.invoke({
+            agent_tts = create_agent_tts(self, tool_ctx)
+            audio_file_paths, response = await agent_tts.ainvoke({
                 "user_name": user_name,
-                "user_input": prompt,
-                "history": self.get_chat_history(chat_id)
+                "user_input": promptn,
+                "history": self.get_chat_history(chat_id),
+                "system_status": system_status
+
             })
             # ttsChain returns wav file path
             # convert wav to ogg
@@ -851,22 +901,26 @@ here is log''')
                         chat_id=chat_id, text="Error converting audio file.")
                 elif len(audio_file_paths) == 1:
                     try:
-                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
+                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response['output'], parse_mode='Markdown')
                     except BaseException as e:
                         if (isinstance(e, telegram.error.BadRequest) and 'Message caption is too long' in str(e)) or 'Can\'t parse entities' in str(e):
                             await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+                            await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
                         else:
-                            await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
+                            try:
+                                await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
+                                await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
+                            except BaseException as e:
+                                await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
                     os.remove(f'downloads/{audio_file_path}.ogg')
                 os.remove(f'downloads/{audio_file_path}')
             if (len(audio_file_paths) > 1):
                 for audio_file_path in audio_file_paths:
                     await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
                     os.remove(f'downloads/{audio_file_path}.ogg')
-                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
-            self.record_message(chat_id, f"User: {prompt}")
-            self.record_message(chat_id, f"Bot: {response}")
+                await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
+            self.record_message(
+                chat_id, response['response']['messages'])
 
     def escape_markdown_v2(self, text):
         """
@@ -896,8 +950,8 @@ here is log''')
         """
         if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
             await context.bot.send_message(
-                chat_id=chat_id, text="You are not authorized to use this command.")
-            return
+                chat_id=chat_id, text=self.un_authorized_message)
+            return self.un_authorized_message
         users_available = False
         user_list = "Authorized Users:\n"
         for user in self.auth_list['authorized']:
@@ -908,6 +962,7 @@ here is log''')
             users_available = True
         await context.bot.send_message(
             chat_id=chat_id, text=user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
+        return 'list sent to user'
 
     async def kick_user(self, chat_id, command, list_command, first_name, last_name, context):
         """
@@ -922,8 +977,8 @@ here is log''')
         """
         if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
             await context.bot.send_message(
-                chat_id=chat_id, text="You are not authorized to use this command.")
-            return
+                chat_id=chat_id, text=self.un_authorized_message)
+            return self.un_authorized_message
         remove_chat_id = list_command[1] if len(list_command) > 1 else None
         if remove_chat_id and remove_chat_id.isdigit():
             remove_chat_id = int(remove_chat_id)
@@ -932,18 +987,20 @@ here is log''')
         if not remove_chat_id:
             await context.bot.send_message(
                 chat_id=chat_id, text="Please provide the chat ID of the user to remove.")
-            return
+            return "Please provide the chat ID of the user to remove."
         user_to_remove = next(
             (user for user in self.auth_list['authorized'] if user['chat_id'] == remove_chat_id), None)
         if user_to_remove:
             self.auth_list['authorized'].remove(user_to_remove)
-            with open(self.authorzed_users, 'w') as f:
-                json.dump(self.auth_list, f, indent=2)
+            async with aiofiles.open(self.authorzed_users, 'w') as f:
+                await f.write(json.dumps(self.auth_list, indent=2))
             await context.bot.send_message(
                 chat_id=self.admin_chat_id, text=f"User {user_to_remove['Name']} has been kicked.")
+            return f"User {user_to_remove['Name']} has been kicked."
         else:
             await context.bot.send_message(
                 chat_id=self.admin_chat_id, text="User not found in the authorized list.")
+            return "User not found in the authorized list."
 
     async def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name, context):
         # Set up ngrok tunnel
@@ -954,15 +1011,15 @@ here is log''')
             if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
                 await context.bot.send_message(
                     chat_id=self.admin_chat_id, text=f'''RDP tunnel stopped by {first_name} {last_name}''')
-            return
+            return "RDP tunnel stopped"
         elif (self.video_state):
             await context.bot.send_message(
                 chat_id=chat_id, text="Cannot start RDP tunnel as other video feed is running on the server")
-            return
+            return "Cannot start RDP tunnel as other video feed is running on the server"
         elif (self.screen_state):
             await context.bot.send_message(
                 chat_id=chat_id, text="Cannot start RDP tunnel as other screen feed is running on the server")
-            return
+            return "Cannot start RDP tunnel as other screen feed is running on the server"
         ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
 
         self.rdp_active = True
@@ -977,3 +1034,4 @@ here is log''')
         if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
             await context.bot.send_message(
                 chat_id=self.admin_chat_id, text=f'''RDP tunnel started by {first_name} {last_name}''')
+        return f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`"
