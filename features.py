@@ -862,7 +862,7 @@ here is log''')
             #     "history": self.get_chat_history(chat_id)
             # })
 
-            agent = create_agent_Custom(
+            agent = create_agent_text(
                 self, tool_ctx
             )
             # agent_prompt = prompt_template.invoke()
