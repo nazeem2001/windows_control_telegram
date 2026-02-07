@@ -1,5 +1,4 @@
 import asyncio
-from multiprocessing import context
 import socket
 import telegram
 from werkzeug.utils import safe_join
@@ -22,10 +21,9 @@ import joblib
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 import asyncio
-from chains import create_agent_tts, llm, prompt_template, olamaChain, ttsChain, create_agent_text
+from chains import create_agent_tts, create_agent_text, response_formatter_chain
 
 from models.tool_context import ToolContext
-from tool_config import build_tools
 import aiofiles
 if (os.getenv("CHAT_BOT_ENABLED") != "False"):
     import ollama
@@ -873,7 +871,9 @@ here is log''')
                 "history": self.get_chat_history(chat_id),
                 "system_status": system_status
             })
+
             response = agent_response['output']
+            response = response_formatter_chain.invoke({"response": response})
             print(agent_response)
             print("Generated text response:", response)
             self.record_message(
@@ -882,13 +882,17 @@ here is log''')
         else:
             print("Generating audio response...")
             agent_tts = create_agent_tts(self, tool_ctx)
-            audio_file_paths, response = await agent_tts.ainvoke({
+            audio_file_paths, agent_response = await agent_tts.ainvoke({
                 "user_name": user_name,
                 "user_input": promptn,
                 "history": self.get_chat_history(chat_id),
                 "system_status": system_status
 
             })
+            print(agent_response)
+
+            response = agent_response['output']
+            response = response_formatter_chain.invoke({"response": response})
             # ttsChain returns wav file path
             # convert wav to ogg
             for audio_file_path in audio_file_paths:
@@ -901,15 +905,15 @@ here is log''')
                         chat_id=chat_id, text="Error converting audio file.")
                 elif len(audio_file_paths) == 1:
                     try:
-                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response['output'], parse_mode='Markdown')
+                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
                     except BaseException as e:
                         if (isinstance(e, telegram.error.BadRequest) and 'Message caption is too long' in str(e)) or 'Can\'t parse entities' in str(e):
                             await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                            await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
+                            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
                         else:
                             try:
                                 await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                                await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
+                                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
                             except BaseException as e:
                                 await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
                     os.remove(f'downloads/{audio_file_path}.ogg')
@@ -918,9 +922,9 @@ here is log''')
                 for audio_file_path in audio_file_paths:
                     await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
                     os.remove(f'downloads/{audio_file_path}.ogg')
-                await context.bot.send_message(chat_id=chat_id, text=response['output'], parse_mode='Markdown')
+                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
             self.record_message(
-                chat_id, response['response']['messages'])
+                chat_id, agent_response['response']['messages'])
 
     def escape_markdown_v2(self, text):
         """

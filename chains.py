@@ -4,8 +4,6 @@ from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda
-import random
-import numpy as np
 import torch
 from chatterbox.tts import ChatterboxTTS
 import torchaudio as ta
@@ -80,25 +78,17 @@ def generate_audio(chat_history, exaggeration, temperature, cfgw, min_p, top_p, 
 llm = ChatOllama(model="llama3.1", keep_alive="0")
 
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant.you can use tools to interact with the system. Use them wisely to help the user. Only use the tools when necessary and make sure to provide the correct input to the tools. don't give an empty response. ## If you are unsure about something, ask the user for clarification.##Important: dont use'*' for list items in your response as it may interfere with markdown parsing. ##Important: If you are using the video tool, make sure to ask the user for confirmation before starting the video stream.##Important: If you are using the screen sharing tool, make sure to ask the user for confirmation before starting the screen sharing.##Important: use the system status to decide whether to use the video or screen sharing tool.##Important: If the user asks for the system status, provide the current status of the system including remote desktop, live video, screen sharing, and NLP state."),
+    ("system", "You are a helpful assistant.you can use tools to interact with the system. Use them wisely to help the user. Only use the tools when necessary and make sure to provide the correct input to the tools. don't give an empty response. ## If you are unsure about something, ask the user for clarification.##Important: dont use'*' for list items in your response as it may interfere with markdown parsing. ##Important: If you are using the video tool, make sure to ask the user for confirmation before starting the video stream.##Important: If you are using the screen sharing tool, make sure to ask the user for confirmation before starting the screen sharing.##Important: use the system status to decide whether to use the video or screen sharing tool.##Important: If the user asks for the system status, provide the current status of the system including remote desktop, live video, screen sharing, and NLP state.for opening applications, use the 'execute_command_terminal' with the start command for non-blocking behavior."),
     MessagesPlaceholder(variable_name="history"),
     ("system", "{system_status}"),
     ("user", "{user_name} says: {user_input}"),
     ("placeholder", "{agent_scratchpad}")
 ])
 
-# ollamaChain that can be imported and used in features.py
-olamaChain = prompt_template | llm | StrOutputParser()
-# using olamaChain to create another chain wihich has chaterbox  tts and outputs wave file
-ttsChain = olamaChain | RunnableLambda(lambda x: generate_audio(
-    x, exaggeration=.5, temperature=1.0, cfgw=0.5, min_p=0.05, top_p=1.0, repetition_penalty=1.2))
-# global_agent.py
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a system control agent."),
-    ("human", "{input}"),
-    ("placeholder", "{agent_scratchpad}")
-])
+response_formatter_chain = ChatPromptTemplate.from_messages([
+    ('user', 'response: {response} \n format the response in markdown format##Important## remove "*" for bullet points and use "-" instead. if there is code block use triple backticks for code blocks. ##Important## only respond with the markdown text without any additional explanation')
+]) | llm | StrOutputParser()
 
 
 def create_agent_text(features, tool_ctx):
