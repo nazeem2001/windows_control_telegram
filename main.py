@@ -100,8 +100,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         break
                 if authorized:
                     list_command = command.split()
-                    await feature.execute_chat_command_async(
-                        chat_id, command, list_command, first_name, last_name, context)
+                    try:
+                        await feature.execute_chat_command_async(
+                            chat_id, command, list_command, first_name, last_name, context)
+                    except Exception as e:
+                        print(e)
+                        await context.bot.send_message(
+                            chat_id=chat_id, text=f"Error executing command: {str(e)}")
                 else:
                     await feature.send_first_auth_code_async(chat_id, name, context)
             else:
@@ -127,12 +132,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
 
         speach_recon, command = await feature.download_file_async(msg_for_download, key, update, context)
-        
+
         if speach_recon is True:
             name = f'{first_name} {last_name}'
             list_command = command.split()
-            await feature.execute_chat_command_async(
-                chat_id, command, list_command, first_name, last_name, context, is_audio=True)
+            try:
+                await feature.execute_chat_command_async(
+                    chat_id, command, list_command, first_name, last_name, context)
+            except Exception as e:
+                print(e)
+                await context.bot.send_message(
+                    chat_id=chat_id, text=f"Error executing command: {str(e)}"
+                )
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):

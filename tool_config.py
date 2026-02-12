@@ -1,6 +1,7 @@
+import time
 from langchain_core.tools import tool
 from adaptors.tool_adaptor import execute_llm_tool
-from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.tools import DuckDuckGoSearchRun, DuckDuckGoSearchResults
 
 
 def build_tools(feature, tool_ctx):
@@ -14,23 +15,13 @@ def build_tools(feature, tool_ctx):
     @tool
     async def types(text: str) -> str:
         """Type text on the system keyboard"""
-        await execute_llm_tool(
-            feature,
-            "types",
-            {"text": text},
-            tool_ctx
-        )
+        await execute_llm_tool(feature, "types", {"text": text}, tool_ctx)
         return f"Typed text: {text}"
 
     @tool
     async def send(path: str) -> str:
         """Send a file to the user by path"""
-        await execute_llm_tool(
-            feature,
-            "send",
-            {"text": path},
-            tool_ctx
-        )
+        await execute_llm_tool(feature, "send", {"text": path}, tool_ctx)
         return f"Sent file at path: {path}"
 
     @tool
@@ -60,5 +51,31 @@ def build_tools(feature, tool_ctx):
     async def toggle_rdp_tunnel() -> str:
         """Toggle RDP tunnel on or off"""
         return await execute_llm_tool(feature, "rdp", {}, tool_ctx)
-        
-    return [video, types, send, screenshot, screen_share, remove_user, get_authorized_users, toggle_rdp_tunnel, DuckDuckGoSearchRun()]
+    @tool
+    def get_date_time() -> str:
+        """Get the current date and time from the system"""
+        return time.ctime()
+
+    @tool
+    async def clear_history() -> str:
+        """Clear the chat history"""
+        return await execute_llm_tool(feature, "clear_history", {}, tool_ctx)
+
+    return [
+        video,
+        types,
+        send,
+        screenshot,
+        get_date_time,
+        screen_share,
+        remove_user,
+        get_authorized_users,
+        toggle_rdp_tunnel,
+        clear_history,
+        DuckDuckGoSearchRun(),
+    ]
+
+    
+    
+    
+    

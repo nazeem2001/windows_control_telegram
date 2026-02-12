@@ -21,7 +21,7 @@ import joblib
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
 import asyncio
-from chains import create_agent_tts, create_agent_text, response_formatter_chain
+from chains import create_agent_tts, create_agent_text, response_formatter_chain, agent_system_prompt
 
 from models.tool_context import ToolContext
 import aiofiles
@@ -110,6 +110,7 @@ class Features:
         self.no_nlp = {}  # Dictionary to store no NLP flag per chat
         self.chat_mode = {}  # Dictionary to store chat modes
         self.nlp_classifier_output = {}  # Dictionary to store NLP classifier outputut
+        self.clear_history_flag = {}  # Dictionary to store clear history flag per chat
         self.keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton('yes', callback_data='yes'), InlineKeyboardButton(
                 'no', callback_data='no')],
@@ -145,6 +146,7 @@ class Features:
             "kick": self.kick_user,
             "rdp": self.start_stop_rdp_tunnel,
             'nlp': self.set_nlp_flag_async,
+            'clear_history': self.clear_history,
         }
         self._commmand_confrimation_msg = {
             "send": "did you mean to send a document?",
@@ -852,6 +854,11 @@ here is log''')
         system_status = await self.get_system_status(chat_id, command, list_command, first_name, last_name, context, True)
         tool_ctx = ToolContext(
             chat_id, first_name, last_name, context)
+        chat_history = []
+        if len(self.get_chat_history(chat_id)) == 0:
+            chat_history.append(agent_system_prompt)
+        else:
+            chat_history = self.get_chat_history(chat_id)
 
         if not is_audio:
             # response = olamaChain.invoke({
@@ -863,12 +870,13 @@ here is log''')
             agent = create_agent_text(
                 self, tool_ctx
             )
+
             # agent_prompt = prompt_template.invoke()
 
             agent_response = await agent.ainvoke({
                 "user_name": user_name,
                 "user_input": promptn,
-                "history": self.get_chat_history(chat_id),
+                "history": chat_history,
                 "system_status": system_status
             })
 
@@ -876,8 +884,12 @@ here is log''')
             response = response_formatter_chain.invoke({"response": response})
             print(agent_response)
             print("Generated text response:", response)
-            self.record_message(
-                chat_id, agent_response['response']['messages'])
+            if (self.clear_history_flag.get(chat_id, False)):
+                self.chat_history[chat_id] = []
+                self.clear_history_flag[chat_id] = False
+            else:
+                self.record_message(
+                    chat_id, agent_response['response']['messages'])
             await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
         else:
             print("Generating audio response...")
@@ -885,7 +897,7 @@ here is log''')
             audio_file_paths, agent_response = await agent_tts.ainvoke({
                 "user_name": user_name,
                 "user_input": promptn,
-                "history": self.get_chat_history(chat_id),
+                "history": chat_history,
                 "system_status": system_status
 
             })
@@ -923,8 +935,12 @@ here is log''')
                     await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
                     os.remove(f'downloads/{audio_file_path}.ogg')
                 await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
-            self.record_message(
-                chat_id, agent_response['response']['messages'])
+            if (self.clear_history_flag.get(chat_id, False)):
+                self.chat_history[chat_id] = []
+                self.clear_history_flag[chat_id] = False
+            else:
+                self.record_message(
+                    chat_id, agent_response['response']['messages'])
 
     def escape_markdown_v2(self, text):
         """
@@ -1039,3 +1055,8 @@ here is log''')
             await context.bot.send_message(
                 chat_id=self.admin_chat_id, text=f'''RDP tunnel started by {first_name} {last_name}''')
         return f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`"
+
+    async def clear_history(self, chat_id, command, list_command, first_name, last_name, context):
+        self.clear_history_flag[chat_id] = True
+        await context.bot.send_message(chat_id=chat_id, text="Chat history cleared")
+        return "Chat history cleared"
