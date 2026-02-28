@@ -13,16 +13,8 @@ pyngrok
 python-dotenv
 jinja2>=3.1.3
 Flask-SocketIO
-ollama
 pandas
 numpy==1.25.2
 scikit-learn
 joblib
 openpyxl
-langchain 
-langchain-ollama
-torch
-torchaudio
-langchain_community
-ddgs
-duckduckgo-search

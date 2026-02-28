@@ -5,6 +5,7 @@ A comprehensive Telegram bot for remote system control with AI-powered assistanc
 ## Overview
 
 This project integrates a Telegram bot with intelligent AI capabilities (powered by Llama 3.1 via Ollama) to provide remote system control, automation, and interactive features. The bot supports both text-based and text-to-speech (TTS) modes with tool integration for system operations.
+
 ## Features Summary
 
 - **AI-Powered Assistant**: Uses Llama 3.1 for intelligent command understanding and execution
@@ -17,21 +18,64 @@ This project integrates a Telegram bot with intelligent AI capabilities (powered
 - **Authorization Management**: Whitelist-based user authorization
 - **Comprehensive Logging**: Full command and activity logs
 
-
-
 ## Installation
 
-Install required dependencies:
+1. Install required dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Ensure you have Ollama installed and the Llama 3.1 model pulled:
+If you enable the chat bot feature by setting `CHAT_BOT_ENABLED=True` in your `.env`, you must also install the AI/model requirements:
+
+```bash
+pip install -r ai-requirements.txt
+```
+
+2. Install Ollama (if you plan to use the local Llama models)
+
+Follow the platform-specific installer instructions at the Ollama docs, then pull the model:
 
 ```bash
 ollama pull llama3.1
 ```
+
+3. Install and configure ngrok (for public tunnels)
+
+- Install ngrok from the official site and set your `NGROK_TOKEN` environment variable.
+- Add `NGROK_TOKEN` (and other settings) to a `.env` file by copying the example:
+
+Windows:
+
+```powershell
+copy env.example .env
+```
+
+Linux / macOS:
+
+```bash
+cp env.example .env
+```
+
+Edit `.env` and set `API_KEY`, `ADMIN_CHAT_ID`, `NGROK_TOKEN`, and other values.
+
+4. Ensure platform tools are available
+
+- Install FFmpeg and set `FFMPEG_PATH_PREFIX` in `.env` if using TTS or audio features.
+- On Windows, running RDP-related features may require administrator privileges.
+
+5. Run the bot
+
+```bash
+python main.py
+```
+
+Optional: create the provided `lanchBot.bat` / `lanchBot.vbs` files for automatic startup on Windows (see Auto-Start Configuration).
+
+Troubleshooting
+
+- If you don't intend to run Ollama locally, skip the Ollama/`ai-requirements.txt` steps and run in non-AI mode.
+- If ngrok tunnels fail, verify `NGROK_TOKEN` and that no other service is occupying required local ports.
 
 ## Architecture
 
@@ -208,4 +252,3 @@ Set WshShell = Nothing
 - `adaptors/`: Tool adapters
 - `downloads/`: Generated files (audio, etc.)
 - `tele_bot_log/`: Bot logs
-

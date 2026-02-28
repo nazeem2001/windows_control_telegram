@@ -1,4 +1,5 @@
 import asyncio
+import aiofiles
 import socket
 import telegram
 from werkzeug.utils import safe_join
@@ -20,14 +21,9 @@ from pyngrok import ngrok
 import joblib
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes
-import asyncio
-from chains import create_agent_tts, create_agent_text, response_formatter_chain, agent_system_prompt
-
-from models.tool_context import ToolContext
-import aiofiles
 if (os.getenv("CHAT_BOT_ENABLED") != "False"):
-    import ollama
-# from langchain.agents import create_agent
+    from chains import create_agent_tts, create_agent_text, response_formatter_chain, agent_system_prompt
+    from models.tool_context import ToolContext
 
 
 class Features:

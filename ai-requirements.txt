@@ -1,0 +1,8 @@
+ollama
+langchain 
+langchain-ollama
+torch
+torchaudio
+langchain_community
+ddgs
+duckduckgo-search
