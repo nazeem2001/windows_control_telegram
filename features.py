@@ -1,6 +1,7 @@
 import asyncio
 import aiofiles
 import socket
+import pyautogui
 import telegram
 from werkzeug.utils import safe_join
 import live_webserver as lw
@@ -538,17 +539,9 @@ class Features:
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
         """
-        keyboard = key()
-        # Extract the text to type from command_list (everything after the command name)
-        text_to_type = ' '.join(command_list[1:]) if len(
-            command_list) > 1 else ""
+        pyautogui.typewrite(command[len(command_list[0])+1:], interval=0.06)
 
-        # Type character by character with small delays to handle long strings reliably
-        for char in text_to_type:
-            keyboard.type(char)
-            await asyncio.sleep(0.06)  # 10ms delay between characters
-
-        print(f"typed {text_to_type}")
+        print(f"typed {command[len(command_list[0])+1:]}")
         return 'typed text with keyboard controller'
 
     async def take_photo(self, chat_id, command, command_list, first_name, last_name, context):
@@ -857,18 +850,13 @@ here is log''')
             chat_history = self.get_chat_history(chat_id)
 
         if not is_audio:
-            # response = olamaChain.invoke({
-            #     "user_name": user_name,
-            #     "user_input": prompt,
-            #     "history": self.get_chat_history(chat_id)
-            # })
+         
 
             agent = create_agent_text(
                 self, tool_ctx
             )
 
-            # agent_prompt = prompt_template.invoke()
-
+           
             agent_response = await agent.ainvoke({
                 "user_name": user_name,
                 "user_input": promptn,

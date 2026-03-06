@@ -18,3 +18,4 @@ numpy==1.25.2
 scikit-learn
 joblib
 openpyxl
+pyautogui
