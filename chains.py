@@ -33,7 +33,7 @@ def split_text_into_chunks(text, max_length=300):
         word_length = len(word) + (1 if current_chunk else 0)  # +1 for space
         if current_length + word_length > max_length and current_chunk:
             # Save current chunk and start a new one
-            chunks.append(' '.join(current_chunk))
+            chunks.append(" ".join(current_chunk))
             current_chunk = [word]
             current_length = len(word)
         else:
@@ -42,15 +42,17 @@ def split_text_into_chunks(text, max_length=300):
 
     # Add the last chunk if it exists
     if current_chunk:
-        chunks.append(' '.join(current_chunk))
+        chunks.append(" ".join(current_chunk))
 
     return chunks
 
 
-def generate_audio(chat_history, exaggeration, temperature, cfgw, min_p, top_p, repetition_penalty):
+def generate_audio(
+    chat_history, exaggeration, temperature, cfgw, min_p, top_p, repetition_penalty
+):
     model = ChatterboxTTS.from_pretrained(DEVICE)
     chunks = []
-    text = chat_history['output']if chat_history else ""
+    text = chat_history["output"] if chat_history else ""
     if len(text) > 300:
         chunks = split_text_into_chunks(text, 300)
     else:
@@ -76,20 +78,33 @@ def generate_audio(chat_history, exaggeration, temperature, cfgw, min_p, top_p, 
     return file_names, chat_history
 
 
-llm = ChatOllama(model="llama3.1", keep_alive="0")
+llm = ChatOllama(model="gemma4", keep_alive="0", reasoning=True)
 
-agent_system_prompt = SystemMessage(content="You are a helpful assistant.you can use tools to interact with the system. Use them wisely to help the user. Only use the tools when necessary and make sure to provide the correct input to the tools. don't give an empty response. ## If you are unsure about something, ask the user for clarification.##Important: dont use'*' for list items in your response as it may interfere with markdown parsing. ##Important: If you are using the video tool, make sure to ask the user for confirmation before starting the video stream.##Important: If you are using the screen sharing tool, make sure to ask the user for confirmation before starting the screen sharing.##Important: use the system status to decide whether to use the video or screen sharing tool.##Important: If the user asks for the system status, provide the current status of the system including remote desktop, live video, screen sharing, and NLP state.for opening applications, use the 'execute_command_terminal' with the start command for non-blocking behavior.")
-prompt_template = ChatPromptTemplate.from_messages([
-    MessagesPlaceholder(variable_name="history"),
-    ("system", "{system_status}"),
-    ("user", "{user_name} says: {user_input}"),
-    ("placeholder", "{agent_scratchpad}")
-])
+agent_system_prompt = SystemMessage(
+    content="You are a helpful assistant.you can use tools to interact with the system. Use them wisely to help the user. Only use the tools when necessary and make sure to provide the correct input to the tools. don't give an empty response. ## If you are unsure about something, ask the user for clarification.##Important: dont use'*' for list items in your response as it may interfere with markdown parsing. ##Important: If you are using the video tool, make sure to ask the user for confirmation before starting the video stream.##Important: If you are using the screen sharing tool, make sure to ask the user for confirmation before starting the screen sharing.##Important: use the system status to decide whether to use the video or screen sharing tool.##Important: If the user asks for the system status, provide the current status of the system including remote desktop, live video, screen sharing, and NLP state.for opening applications, use the 'execute_command_terminal' with the start command for non-blocking behavior."
+)
+prompt_template = ChatPromptTemplate.from_messages(
+    [
+        MessagesPlaceholder(variable_name="history"),
+        ("system", "{system_status}"),
+        ("user", "{user_name} says: {user_input}"),
+        ("placeholder", "{agent_scratchpad}"),
+    ]
+)
 
 
-response_formatter_chain = ChatPromptTemplate.from_messages([
-    ('user', 'response: {response} \n format the response in markdown format##Important## remove "*" for bullet points and use "-" instead. if there is code block use triple backticks for code blocks. ##Important## only respond with the markdown text without any additional explanation. ##Imoprtant## if the response contains a list, make sure to format it properly in markdown format. ##Important## if the response contains a code block, make sure to format it properly in markdown format.'),
-]) | llm | StrOutputParser()
+response_formatter_chain = (
+    ChatPromptTemplate.from_messages(
+        [
+            (
+                "user",
+                'response: {response} \n format the response in markdown format##Important## remove "*" for bullet points and use "-" instead. if there is code block use triple backticks for code blocks. ##Important## only respond with the markdown text without any additional explanation. ##Imoprtant## if the response contains a list, make sure to format it properly in markdown format. ##Important## if the response contains a code block, make sure to format it properly in markdown format.',
+            ),
+        ]
+    )
+    | llm
+    | StrOutputParser()
+)
 
 
 def create_agent_text(features, tool_ctx):
@@ -100,11 +115,24 @@ def create_agent_text(features, tool_ctx):
         model=llm,
         tools=tools,
     )
-    return (prompt_template | agent | RunnableLambda(lambda x: {'response': x, 'output': x['messages'][-1].content}))
+    return (
+        prompt_template
+        | agent
+        | RunnableLambda(lambda x: {"response": x, "output": x["messages"][-1].content})
+    )
 
 
 def create_agent_tts(features, tool_ctx):
     # tools will be injected later
     agent = create_agent_text(features, tool_ctx)
-    return (agent | RunnableLambda(lambda x: generate_audio(
-        x, exaggeration=.5, temperature=1.0, cfgw=0.5, min_p=0.05, top_p=1.0, repetition_penalty=1.2)))
+    return agent | RunnableLambda(
+        lambda x: generate_audio(
+            x,
+            exaggeration=0.5,
+            temperature=1.0,
+            cfgw=0.5,
+            min_p=0.05,
+            top_p=1.0,
+            repetition_penalty=1.2,
+        )
+    )
