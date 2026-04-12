@@ -51,6 +51,19 @@ def build_tools(feature, tool_ctx):
     async def toggle_rdp_tunnel() -> str:
         """Toggle RDP tunnel on or off"""
         return await execute_llm_tool(feature, "rdp", {}, tool_ctx)
+
+    @tool
+    async def schedule_reminder(natural_language_input: str) -> str:
+        """Schedule a reminder for a future time."""
+        await execute_llm_tool(
+            feature,
+            "schedule_reminder",
+            {"text": natural_language_input},
+            tool_ctx,
+            add_ai_flag=True,
+        )
+        return f"Scheduled reminder: {natural_language_input}"
+
     @tool
     def get_date_time() -> str:
         """Get the current date and time from the system"""
@@ -71,11 +84,7 @@ def build_tools(feature, tool_ctx):
         remove_user,
         get_authorized_users,
         toggle_rdp_tunnel,
+        schedule_reminder,
         clear_history,
         DuckDuckGoSearchRun(),
     ]
-
-    
-    
-    
-    

@@ -14,6 +14,7 @@ from telegram.ext import (
 import asyncio
 import signal
 import sys
+import scheduler_manager
 
 load_dotenv()
 api_key = os.getenv("API_KEY")
@@ -26,6 +27,8 @@ app = (
     .build()
 )
 feature = features.Features(app.bot)  # Pass the bot instance to features
+scheduler = scheduler_manager.SchedulerManager(feature)
+feature.set_scheduler_manager(scheduler)
 Commands_slash = ["/ai", "/non_ai"]
 
 
@@ -204,19 +207,19 @@ async def start_bot():
     )
     app.add_handler(CallbackQueryHandler(handle_callback_query))
 
-    # Send test message
-    await feature.test_message_async(app.bot)
-    # Start the bot
-    await app.initialize()
-    await app.start()
-    print("Bot started...")
+    try:
+        await app.initialize()
+        await app.start()
+        scheduler.start()
+        print("Scheduler loaded persisted reminders from reminders.json")
+        await feature.test_message_async(app.bot)
+        print("Bot started...")
 
-    # Run the bot until interrupted
-    async with app:
         await app.updater.start_polling()
-        # Keep the bot running
         while True:
             await asyncio.sleep(1)
+    finally:
+        scheduler.shutdown()
 
 
 def signal_handler(sig, frame):

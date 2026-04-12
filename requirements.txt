@@ -5,7 +5,7 @@ pynput
 pyperclip
 pillow
 requests
-aiohttp>3.9.2
+aiohttp>3.13.4
 pyttsx3
 SpeechRecognition
 flask
@@ -19,3 +19,4 @@ scikit-learn
 joblib
 openpyxl
 pyautogui
+APScheduler>=3.10.0

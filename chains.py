@@ -78,7 +78,7 @@ def generate_audio(
     return file_names, chat_history
 
 
-llm = ChatOllama(model="llama3.1", keep_alive="0")
+llm = ChatOllama(model="gemma4", keep_alive="0", reasoning=True)
 
 agent_system_prompt = SystemMessage(
     content="""You are a helpful assistant.you can use tools to interact with the system. Use them wisely to help the user. 
@@ -100,6 +100,7 @@ agent_system_prompt = SystemMessage(
     - remove_user: Remove a user from the system. Input should be the username of the user to remove.,
     - get_authorized_users: Get a list of authorized users. Input should be empty.,
     - toggle_rdp_tunnel: Toggle the RDP tunnel. Input should be empty.,
+    - schedule_reminder: **Important**:don't call this tool if you get a message starts with "Remnder Message:" this means its a reminder. Schedule a reminder at a future time using natural language. Input should be the reminder text and optional schedule details. Example: "send me the latest news every day at 9am." the input to this tool will be something like "Remnder Message: send me the latest news at 9:00am everyday." the time format should be like HH:MM(am/pm) and the recurrence pattern can be daily, every day, everyday, or every monday/tuesday/wednesday/thursday/friday/saturday/sunday. if no time is provided, the reminder will be set for 1 minute from now. if no recurrence pattern is provided, the reminder will be set as one-time.
     - clear_history: Clear the chat history. Input should be empty.,
     - DuckDuckGoSearchRun: Perform a search using DuckDuckGo. Input should be the search query."""
 )

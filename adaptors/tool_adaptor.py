@@ -5,7 +5,8 @@ async def execute_llm_tool(
     feature,
     tool_name: str,
     arguments: dict,
-    tool_ctx: ToolContext
+    tool_ctx: ToolContext,
+    add_ai_flag: bool = False
 ):
     print(f"Executing tool: {tool_name} with arguments: {arguments}")
     if arguments:
@@ -15,6 +16,17 @@ async def execute_llm_tool(
     else:
         command = tool_name
         command_list = [tool_name]
+
+    if add_ai_flag:
+        return await feature.command_handlers[tool_name](
+            tool_ctx.chat_id,
+            command,
+            command_list,
+            tool_ctx.first_name,
+            tool_ctx.last_name,
+            tool_ctx.context,
+            is_ai=True
+        )
 
     return await feature.command_handlers[tool_name](
         tool_ctx.chat_id,
