@@ -4,11 +4,11 @@ A comprehensive Telegram bot for remote system control with AI-powered assistanc
 
 ## Overview
 
-This project integrates a Telegram bot with intelligent AI capabilities (powered by Llama 3.1 via Ollama) to provide remote system control, automation, and interactive features. The bot supports both text-based and text-to-speech (TTS) modes with tool integration for system operations.
+This project integrates a Telegram bot with intelligent AI capabilities (powered by gemma 4 via Ollama) to provide remote system control, automation, and interactive features. The bot supports both text-based and text-to-speech (TTS) modes with tool integration for system operations.
 
 ## Features Summary
 
-- **AI-Powered Assistant**: Uses Llama 3.1 for intelligent command understanding and execution
+- **AI-Powered Assistant**: Uses gemma 4 for intelligent command understanding and execution
 - **Bidirectional Tool Control**: System webcam, screen capture, keyboard input, and terminal commands
 - **Remote Desktop Access**: Secure RDP tunnel setup
 - **File Transfer**: Send and receive files
@@ -40,7 +40,7 @@ pip install -r ai-requirements.txt
 Follow the platform-specific installer instructions at the Ollama docs, then pull the model:
 
 ```bash
-ollama pull llama3.1
+ollama pull gemma4
 ```
 
 3. Install and configure ngrok (for public tunnels)
@@ -84,7 +84,7 @@ Troubleshooting
 
 ### Core Components
 
-- **chains.py**: LangChain agent configuration using Ollama (Llama 3.1 model) with integrated tools and audio generation via ChatterboxTTS
+- **chains.py**: LangChain agent configuration using Ollama (gemma 4 model) with integrated tools and audio generation via ChatterboxTTS
 - **tool_config.py**: Tool definitions and system command execution handlers
 - **tool_adaptor.py**: Bridge between Telegram commands and tool execution
 - **features.py**: Feature flag management for tool availability
@@ -103,7 +103,7 @@ The AI agent has access to the following tools:
 - **screen_share**: Toggle screen sharing on or off
 - **types**: Type text using the system keyboard
 - **send**: Send a file to the user by file path
-- **execute_command_terminal**: Execute terminal commands with automatic window focus for opened applications (currently fully supported in non-AI mode; AI mode support in progress)
+- **execute_command_terminal**: Execute terminal commands with automatic window focus for opened applications
 - **toggle_rdp_tunnel**: Toggle RDP tunnel for remote desktop access
 - **schedule_reminder**: Create a reminder using natural language input
 - **get_authorized_users**: Retrieve list of authorized users
@@ -114,7 +114,7 @@ The AI agent has access to the following tools:
 
 ### AI Chat Mode (`/ai`)
 
-Uses the LangChain agent with Llama 3.1 to understand natural language and intelligently use available tools.
+Uses the LangChain agent with gemma 4 to understand natural language and intelligently use available tools.
 
 ### Non-AI Chat Mode (`/non_ai`)
 
@@ -130,7 +130,7 @@ Generate audio responses from AI outputs with ChatterboxTTS (supports chunking f
 
 1. User sends a natural language command or question
 2. LangChain agent receives the input along with system status
-3. Llama 3.1 model analyzes the request and determines which tools to use
+3. gemma 4 model analyzes the request and determines which tools to use
 4. Agent automatically invokes appropriate tools from `command_handlers`
 5. Tool output is processed and returned to user
 6. Optional: Response can be converted to audio using ChatterboxTTS
@@ -249,7 +249,7 @@ Set WshShell = Nothing
 ## Configuration
 
 - **Environment Variables**: Copy `env.example` to `.env` and configure your Telegram token and settings
-- **Ollama Model**: Configured to use Llama 3.1 (see `chains.py`)
+- **Ollama Model**: Configured to use gemma 4 (see `chains.py`)
 - **Device Detection**: Automatically uses CUDA if available, otherwise CPU
 - **Authorized Users**: Stored in `authorzed_Users/authorzed_Users.json`
 
