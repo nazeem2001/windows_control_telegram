@@ -15,6 +15,7 @@ This project integrates a Telegram bot with intelligent AI capabilities (powered
 - **Audio Generation**: Text-to-speech with customizable parameters
 - **Command Classification**: ML-based intelligent command recognition
 - **Multi-Mode Operation**: Support for AI and rule-based modes
+- **Reminder Scheduling**: Natural language reminder creation and automated execution
 - **Authorization Management**: Whitelist-based user authorization
 - **Comprehensive Logging**: Full command and activity logs
 
@@ -25,6 +26,8 @@ This project integrates a Telegram bot with intelligent AI capabilities (powered
 ```bash
 pip install -r requirements.txt
 ```
+
+This project now includes reminder scheduling support, and `requirements.txt` includes `APScheduler` for background reminder execution.
 
 If you enable the chat bot feature by setting `CHAT_BOT_ENABLED=True` in your `.env`, you must also install the AI/model requirements:
 
@@ -86,6 +89,10 @@ Troubleshooting
 - **tool_adaptor.py**: Bridge between Telegram commands and tool execution
 - **features.py**: Feature flag management for tool availability
 - **trainer.py**: ML-based text classifier for command recognition
+- **reminder_db.py**: Reminder data storage and retrieval
+- **reminder_parser.py**: Natural language reminder parsing
+- **reminder_executor.py**: Executing scheduled reminders and actions
+- **scheduler_manager.py**: APScheduler-based reminder scheduling
 
 ### Available Tools/Commands
 
@@ -98,6 +105,7 @@ The AI agent has access to the following tools:
 - **send**: Send a file to the user by file path
 - **execute_command_terminal**: Execute terminal commands with automatic window focus for opened applications (currently fully supported in non-AI mode; AI mode support in progress)
 - **toggle_rdp_tunnel**: Toggle RDP tunnel for remote desktop access
+- **schedule_reminder**: Create a reminder using natural language input
 - **get_authorized_users**: Retrieve list of authorized users
 - **remove_user**: Remove a user from the authorized list
 - **Web Search**: DuckDuckGo search integration for information retrieval
@@ -204,6 +212,13 @@ This approach balances automation with safety, catching potential misunderstandi
   - `video`: Toggle video stream
   - `screen`: Toggle screen share
   - `speak <text>`: Text-to-speech command
+  - `remind <text>`: Schedule a reminder via natural language
+  - `schedule_reminder <text>`: Schedule a reminder via natural language
+  - `list_reminders`: List scheduled reminders
+  - `delete_reminder <id>`: Remove a scheduled reminder
+  - `test_reminder <id>`: Test a scheduled reminder
+  - `nlp`: Toggle NLP processing mode
+  - `clear_history`: Clear chat history
 
 ## Auto-Start Configuration (Windows)
 
@@ -247,6 +262,10 @@ Set WshShell = Nothing
 - `features.py`: Feature management
 - `trainer.py`: ML classifier for command recognition
 - `logger.py`: Logging utilities
+- `reminder_db.py`: Reminder data storage and retrieval
+- `reminder_parser.py`: Natural language reminder parsing
+- `reminder_executor.py`: Reminder execution and action dispatch
+- `scheduler_manager.py`: APScheduler-based scheduling manager
 - `templates/`: HTML templates for web interface
 - `models/`: Context and configuration models
 - `adaptors/`: Tool adapters
