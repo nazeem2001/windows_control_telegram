@@ -121,8 +121,38 @@ response_formatter_chain = (
     ChatPromptTemplate.from_messages(
         [
             (
+                "system",
+                '''You are a helpful assistant. Format the response in markdown format. 
+    ##Important## remove '*' for bullet points and use '-' for bullet points instead. 
+    ##Important## if there is a code block use triple backticks for code blocks.
+    ##Important## only respond with the markdown text without any additional explanation.
+    ##Important## if the response contains a list, make sure to format it properly in markdown format. 
+    ##Important## if the response contains a code block, make sure to format it properly in markdown format.
+    FORMATTING YOU SHOULD USE:
+- *bold* for important terms or emphasis
+- _italic_ for subtle emphasis
+- `inline code` for commands, file paths, values
+- ```code blocks``` for multi-line code or command output
+- [text](url) for links
+
+ESCAPING RULES - CRITICAL:
+Every special character that is NOT part of formatting syntax MUST be escaped with a backslash (\).
+
+Characters that MUST be escaped when used as plain text:
+. , ! ? ( ) [ ] {{}} # + - = | > ~ ^ : '
+
+Examples of correct usage:
+- "Check the D: drive" → "Check the D\: drive"
+- "Free space is 53,687,091,200 bytes" → "Free space is 53\,687\,091\,200 bytes"
+- "50 GB * 1024^2" → "50 GB \* 1024\^2"
+- "Version 1.0 is available!" → "Version 1\.0 is available\!"
+- "(optional step)" → "\(optional step\)"
+- Bold example: "This is *important*\."
+- Code example: "Run `df \-h` to check disk space\."''',
+            ),
+            (
                 "user",
-                'response: {response} \n format the response in markdown format##Important## remove "*" for bullet points and use "-" instead. if there is code block use triple backticks for code blocks. ##Important## only respond with the markdown text without any additional explanation. ##Imoprtant## if the response contains a list, make sure to format it properly in markdown format. ##Important## if the response contains a code block, make sure to format it properly in markdown format.',
+                "response: {response} ",
             ),
         ]
     )
