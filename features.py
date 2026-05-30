@@ -183,7 +183,6 @@ class Features:
             "remind": self.schedule_reminder,
             "list_reminders": self.list_reminders,
             "delete_reminder": self.delete_reminder,
-            "test_reminder": self.test_reminder,
             "schedule_reminder": self.schedule_reminder,
         }
         self._commmand_confrimation_msg = {
@@ -385,20 +384,6 @@ class Features:
             chat_id=chat_id, text=f"Deleted reminder {reminder_id}."
         )
 
-    async def test_reminder(
-        self, chat_id, command, command_list, first_name, last_name, context
-    ):
-        """Execute a reminder immediately for testing."""
-        if len(list_command) < 2:
-            await context.bot.send_message(
-                chat_id=chat_id, text="Usage: /test_reminder <reminder_id>"
-            )
-            return
-        reminder_id = list_command[1]
-        await execute_reminder(self, reminder_id)
-        await context.bot.send_message(
-            chat_id=chat_id, text=f"Triggered reminder {reminder_id} for testing."
-        )
 
     async def live_server(self, chat_id, first_name, last_name, context):
         """
