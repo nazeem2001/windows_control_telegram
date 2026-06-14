@@ -103,7 +103,7 @@ The AI agent has access to the following tools:
 - **screen_share**: Toggle screen sharing on or off
 - **types**: Type text using the system keyboard
 - **send**: Send a file to the user by file path
-- **execute_command_terminal**: Execute terminal commands with automatic window focus for opened applications (currently fully supported in non-AI mode; AI mode support in progress)
+- **execute_command_terminal**: Execute terminal commands with automatic window focus for opened applications
 - **toggle_rdp_tunnel**: Toggle RDP tunnel for remote desktop access
 - **schedule_reminder**: Create a reminder using natural language input
 - **get_authorized_users**: Retrieve list of authorized users

@@ -90,6 +90,8 @@ agent_system_prompt = SystemMessage(
     ##Important: If you are using the screen sharing tool, make sure to ask the user for confirmation before starting the screen sharing.
     ##Important: use the system status to decide whether to use the video or screen sharing tool.
     ##Important: If the user asks for the system status, provide the current status of the system including remote desktop, live video, screen sharing, and NLP state.for opening applications.
+    use the 'execute_command_terminal' with the start command for non-blocking behavior.
+    ##Important: If you want to open an application, use the 'execute_command_terminal' tool with the start command for non-blocking behavior. For example, to open notepad, don't use 'notepad' as the command, use 'start notepad' as the command.
     #tool List:
     - video: Start or stop webcam streaming. Input should be empty.,
     - types: Type text on the system keyboard. Input should be the text to type.,
@@ -100,6 +102,7 @@ agent_system_prompt = SystemMessage(
     - remove_user: Remove a user from the system. Input should be the username of the user to remove.,
     - get_authorized_users: Get a list of authorized users. Input should be empty.,
     - toggle_rdp_tunnel: Toggle the RDP tunnel. Input should be empty.,
+    - execute_command_terminal: Execute a command in the terminal. Input should be the command to execute.,
     - schedule_reminder: **Important**:don't call this tool if you get a message starts with "Remnder Message:" this means its a reminder. Schedule a reminder at a future time using natural language. Input should be the reminder text and optional schedule details. Example: "send me the latest news every day at 9am." the input to this tool will be something like "Remnder Message: send me the latest news at 9:00am everyday." the time format should be like HH:MM(am/pm) and the recurrence pattern can be daily, every day, everyday, or every monday/tuesday/wednesday/thursday/friday/saturday/sunday. if no time is provided, the reminder will be set for 1 minute from now. if no recurrence pattern is provided, the reminder will be set as one-time.
     - clear_history: Clear the chat history. Input should be empty.,
     - DuckDuckGoSearchRun: Perform a search using DuckDuckGo. Input should be the search query."""
@@ -118,8 +121,38 @@ response_formatter_chain = (
     ChatPromptTemplate.from_messages(
         [
             (
+                "system",
+                '''You are a helpful assistant. Format the response in markdown format. 
+    ##Important## remove '*' for bullet points and use '-' for bullet points instead. 
+    ##Important## if there is a code block use triple backticks for code blocks.
+    ##Important## only respond with the markdown text without any additional explanation.
+    ##Important## if the response contains a list, make sure to format it properly in markdown format. 
+    ##Important## if the response contains a code block, make sure to format it properly in markdown format.
+    FORMATTING YOU SHOULD USE:
+- *bold* for important terms or emphasis
+- _italic_ for subtle emphasis
+- `inline code` for commands, file paths, values
+- ```code blocks``` for multi-line code or command output
+- [text](url) for links
+
+ESCAPING RULES - CRITICAL:
+Every special character that is NOT part of formatting syntax MUST be escaped with a backslash (\).
+
+Characters that MUST be escaped when used as plain text:
+. , ! ? ( ) [ ] {{}} # + - = | > ~ ^ : '
+
+Examples of correct usage:
+- "Check the D: drive" → "Check the D\: drive"
+- "Free space is 53,687,091,200 bytes" → "Free space is 53\,687\,091\,200 bytes"
+- "50 GB * 1024^2" → "50 GB \* 1024\^2"
+- "Version 1.0 is available!" → "Version 1\.0 is available\!"
+- "(optional step)" → "\(optional step\)"
+- Bold example: "This is *important*\."
+- Code example: "Run `df \-h` to check disk space\."''',
+            ),
+            (
                 "user",
-                'response: {response} \n format the response in markdown format##Important## remove "*" for bullet points and use "-" instead. if there is code block use triple backticks for code blocks. ##Important## only respond with the markdown text without any additional explanation. ##Imoprtant## if the response contains a list, make sure to format it properly in markdown format. ##Important## if the response contains a code block, make sure to format it properly in markdown format.',
+                "response: {response} ",
             ),
         ]
     )
