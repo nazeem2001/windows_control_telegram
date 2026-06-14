@@ -1,56 +1,63 @@
 import time
+import inspect
 from langchain_core.tools import tool
 from adaptors.tool_adaptor import execute_llm_tool
 from langchain_community.tools import DuckDuckGoSearchRun, DuckDuckGoSearchResults
 
 
 def build_tools(feature, tool_ctx):
+    """Build tools from both LLM config and explicit special tools"""
+
+    def make_tool(cfg):
+        """Create a tool from an LLM tool configuration"""
+        async def _tool(**kwargs):
+            # Map kwargs to parameters based on args_map
+            params = {k: kwargs.get(v) for k, v in cfg["args_map"].items()} if cfg["args_map"] else {}
+            if cfg.get("add_ai_flag"):
+                 await execute_llm_tool(feature, cfg["command"], params, tool_ctx, add_ai_flag=True)
+            else:
+                await execute_llm_tool(feature, cfg["command"], params, tool_ctx)
+            return f"{cfg['return_msg']} {'with parameters: ' + str(params) if params else ''}"
+        
+        _tool.__name__ = cfg["command"]
+        _tool.__doc__ = cfg["description"]
+           # Pydantic reads __annotations__ for type hints
+        _tool.__annotations__ = {name: str for name in cfg["args_map"].values()}
+    
+            # Build a real signature so inspect.signature() works on it
+        params = [
+        inspect.Parameter(
+            name=param_name,
+            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            annotation=str,
+        )
+        for param_name in cfg["args_map"].values()
+    ]
+        _tool.__signature__ = inspect.Signature(parameters=params)
+        
+        return tool(_tool)
+    print(feature._tool_configs)
+
+    # Generate tools from LLM configs
+    tools = [make_tool(cfg) for cfg in type(feature)._tool_configs]
+
+    # Special tools with unique logic
+    @tool
+    async def schedule_reminder(natural_language_input: str) -> str:
+        """Schedule a reminder for a future time."""
+        await execute_llm_tool(
+            feature,
+            "schedule_reminder",
+            {"text": natural_language_input},
+            tool_ctx,
+            add_ai_flag=True,
+        )
+        return f"Scheduled reminder: {natural_language_input}"
 
     @tool
-    async def video() -> str:
-        """Start or stop webcam streaming"""
-        await execute_llm_tool(feature, "video", {}, tool_ctx)
-        return "Video streaming toggled"
-
-    @tool
-    async def types(text: str) -> str:
-        """Type text on the system keyboard"""
-        await execute_llm_tool(feature, "types", {"text": text}, tool_ctx)
-        return f"Typed text: {text}"
-
-    @tool
-    async def send(path: str) -> str:
-        """Send a file to the user by path"""
-        await execute_llm_tool(feature, "send", {"text": path}, tool_ctx)
-        return f"Sent file at path: {path}"
-
-    @tool
-    async def screenshot() -> str:
-        """Take a screenshot of the whole screen and send it to the user"""
-        await execute_llm_tool(feature, "screenshot", {}, tool_ctx)
-        return "Screenshot taken and sent"
-
-    @tool
-    async def screen_share() -> str:
-        """Start or stop screen sharing"""
-        await execute_llm_tool(feature, "screen", {}, tool_ctx)
-        return "Screen sharing toggled"
-
-    @tool
-    async def remove_user(chat_id: str) -> str:
-        """Remove user from the system"""
-        return await execute_llm_tool(feature, "kick", {"text": chat_id}, tool_ctx)
-
-    @tool
-    async def get_authorized_users() -> str:
-        """Get the list of authorized users"""
-        await execute_llm_tool(feature, "list", {}, tool_ctx)
-        return "Authorized users list sent"
-
-    @tool
-    async def toggle_rdp_tunnel() -> str:
-        """Toggle RDP tunnel on or off"""
-        return await execute_llm_tool(feature, "rdp", {}, tool_ctx)
+    def get_date_time() -> str:
+        """Get the current date and time from the system"""
+        return time.ctime()
 
     @tool
     async def execute_command_terminal(command: str) -> str:
@@ -145,39 +152,13 @@ def build_tools(feature, tool_ctx):
             return f"Error parsing command: {str(e)}"
         except Exception as e:
             return f"Error executing command: {str(e)}"
-    async def schedule_reminder(natural_language_input: str) -> str:
-        """Schedule a reminder for a future time."""
-        await execute_llm_tool(
-            feature,
-            "schedule_reminder",
-            {"text": natural_language_input},
-            tool_ctx,
-            add_ai_flag=True,
-        )
-        return f"Scheduled reminder: {natural_language_input}"
 
-    @tool
-    def get_date_time() -> str:
-        """Get the current date and time from the system"""
-        return time.ctime()
-
-    @tool
-    async def clear_history() -> str:
-        """Clear the chat history"""
-        return await execute_llm_tool(feature, "clear_history", {}, tool_ctx)
-
-    return [
-        video,
-        types,
-        send,
-        screenshot,
-        get_date_time,
-        screen_share,
-        remove_user,
-        get_authorized_users,
-        toggle_rdp_tunnel,
-        execute_command_terminal,
+    # Combine all tools
+    tools.extend([
         schedule_reminder,
-        clear_history,
+        get_date_time,
+        execute_command_terminal,
         DuckDuckGoSearchRun(),
-    ]
+    ])
+
+    return tools
