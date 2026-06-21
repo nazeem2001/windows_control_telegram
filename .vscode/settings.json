@@ -1,3 +1,5 @@
 {
-    "python.analysis.typeCheckingMode": "off"
+    "python.analysis.typeCheckingMode": "off",
+    "snyk.advanced.organization": "21831a8d-bbec-435f-be5c-da697a385645",
+    "snyk.advanced.autoSelectOrganization": true
 }

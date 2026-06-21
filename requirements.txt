@@ -20,3 +20,5 @@ joblib
 openpyxl
 pyautogui
 APScheduler>=3.10.0
+discord.py>=2.0.0
+aiofiles

@@ -25,6 +25,7 @@ import uuid
 from reminder_db import Reminder
 from reminder_parser import parse_reminder_input
 from reminder_executor import execute_reminder
+from transport import TransportAdapter
 from telegram import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -41,7 +42,50 @@ if os.getenv("CHAT_BOT_ENABLED") != "False":
         agent_system_prompt,
     )
     from models.tool_context import ToolContext
+import subprocess
+import time
 import os
+
+
+class FrpcWrapper:
+    def __init__(self, config_path, binary_path="./frpc"):
+        self.config_path = config_path
+        self.binary_path = binary_path
+        self.process = None
+
+    def start(self):
+        """Starts the frpc client as a background process."""
+        serveraddr = None
+        with open(self.config_path, "r") as f:
+            config_content = f.readline()
+            print(config_content)
+            serveraddr = config_content.split("serverAddr =")[1].strip().split("\n")[0]
+        if self.process is None or self.process.poll() is not None:
+            cmd = [self.binary_path, "-c", self.config_path]
+            # Use preexec_fn=os.setsid on Linux to allow easy group killing later
+            self.process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            print(f"frpc started with PID: {self.process.pid}")
+            return True, f"frp client running at `{serveraddr}`"
+        print("frpc is already running.")
+        return False, f"frpc is already running at `{serveraddr}`."
+
+    def stop(self):
+        """Stops the frpc process."""
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+            self.process.wait()
+            print("frpc stopped.")
+            self.process = None
+        return True, "frpc stopped."
+
+    def get_logs(self):
+        """Reads logs from the running process."""
+        if self.process:
+            return self.process.stdout.readline()
+        return None
+
 
 # Module-level dictionaries and decorator for command registration
 _command_handlers = {}
@@ -129,13 +173,20 @@ class Features:
     confirmation_messages = _confirmation_messages
     _tool_configs = _tool_configs
 
-    def __init__(self, telegram_bot):
+    def __init__(
+        self,
+        telegram_bot,
+        transport: TransportAdapter = None,
+        dc_transport: TransportAdapter = None,
+    ):
         """
         Initializes the features class with the given Telegram bot instance.
         Loads environment variables and authorized users.
 
         Args:
             telegram_bot: An instance of the Telegram bot.
+            transport: A TransportAdapter for platform-agnostic messaging.
+                       If None, a default TelegramTransport wrapping telegram_bot is used.
         """
         load_dotenv()
         self.un_authorized_message = "You are not authorized to use this command."
@@ -148,6 +199,7 @@ class Features:
         self.ffmpeg_path_prefix = os.getenv("FFMPEG_PATH_PREFIX")
         self.rdp_port = os.getenv("RDP_PORT", "3389")
         self.rdp_active = False
+        self.dc_admin_chat_id = os.getenv("DC_ADMIN_CHAT_ID")
         self.chat_bot_enabled = os.getenv("CHAT_BOT_ENABLED", "True").lower() in (
             "true",
             "1",
@@ -175,6 +227,8 @@ class Features:
             binary_path="C:\\Users\\Admin\\Downloads\\frp_0.69.0_windows_amd64\\frp_0.69.0_windows_amd64\\frpc.exe",
         )
         self.telegram_bot = telegram_bot
+        self.transport = transport
+        self.dc_transport = dc_transport
         self.scheduler_manager = None
         file_found = False
         self.screen_state = False
@@ -293,20 +347,37 @@ class Features:
             text="NLP enabled" if self.no_nlp[chat_id] else "NLP disabled",
         )
 
-    async def test_message_async(self, bot):
+    async def test_message_async(self, bot=None):
         """
         Sends a test message to the admin with the IP configuration details.
+        Uses self.transport for platform-agnostic sending.
         """
         i = 2
         while i > 0:
             messag = Popen(
                 "ipconfig", shell=True, stdout=PIPE, text=True
             ).communicate()[0]
-            await bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=messag,
-                reply_markup=self.reply_keyboard,
-            )
+            
+            try:
+                await self.transport.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=messag,
+                    reply_markup=self.reply_keyboard,
+                )
+            except Exception as e:
+                print(f"[Telegram] Failed to send message: {e}")
+
+            print(f"#############  {self.dc_admin_chat_id}, {self.dc_transport}")
+            if self.dc_admin_chat_id:
+                try:
+                    await self.dc_transport.send_message(
+                        chat_id=self.dc_admin_chat_id,
+                        text=messag,
+                        reply_markup=self.reply_keyboard,
+                        feature_instance=self,
+                    )
+                except Exception as e:
+                    print(f"[Discord] Failed to send message: {e}")
             i = i - 1
             await asyncio.sleep(1)
 
@@ -431,12 +502,12 @@ class Features:
             first_name (str): The first name of the user.
             last_name (str): The last name of the user.
         """
-        if self.rdp_active:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Cannot start/stop live server as RDP tunnel is running on the server",
-            )
-            return None
+        # if self.rdp_active:
+        #     await context.bot.send_message(
+        #         chat_id=chat_id,
+        #         text="Cannot start/stop live server as RDP tunnel is running on the server",
+        #     )
+        #     return None
         if (
             self.server_thread_state == "ON"
             and not self.video_state
@@ -783,7 +854,7 @@ class Features:
             f.write(self.fin.content)
         self.chat_id_file = 0
         self.fin = ""
-        await self.telegram_bot.send_message(chat_id, f"file saved as {self.fname}")
+        await self.transport.send_message(chat_id, f"file saved as {self.fname}")
         self.fname = ""
         self.file_message_id = "aa"
 
@@ -1086,7 +1157,7 @@ here is log""",
                 text=self._commmand_confrimation_msg[
                     self.nlp_model.classes_.tolist()[predictons.argmax()]
                 ],
-                reply_markup=self.keyboard,
+                reply_markup=self.keyboard, feature_instance=self,
             )
         else:
             await self.command_handlers[
@@ -1477,65 +1548,121 @@ here is log""",
             )
             return "User not found in the authorized list."
 
+    @command("frpip", confirmation="")
+    async def set_frp_tunnel_ip(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        if chat_id != int(self.admin_chat_id):
+            await context.bot.send_message(
+                chat_id=chat_id, text=self.un_authorized_message
+            )
+            return self.un_authorized_message
+        if len(list_command) >= 2:
+            ip = list_command[1]
+            with open(self.frpc.config_path, "r") as f:
+                config_content = f.read()
+            import re
+
+            config_content = re.sub(
+                r'serverAddr = "[^"]*"', f'serverAddr = "{ip}"', config_content
+            )
+            with open(self.frpc.config_path, "w") as f:
+                f.write(config_content)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"FRP tunnel IP updated to {ip}",
+            )
+            return f"FRP tunnel IP updated to {ip}"
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Please provide the IP address to set for the FRP tunnel.",
+            )
+            return "Please provide the IP address to set for the FRP tunnel."
+
     @llm_tool("rdp", "Toggle RDP tunnel on or off", return_msg="RDP tunnel toggled")
     @command("rdp", confirmation="did you mean to start/stop RDP tunnel?")
     async def start_stop_rdp_tunnel(
         self, chat_id, command, list_command, first_name, last_name, context
     ):
         # Set up ngrok tunnel
-        if self.rdp_active:
-            ngrok.kill()
+        # if self.rdp_active:
+        #     ngrok.kill()
+        #     self.rdp_active = False
+        #     await context.bot.send_message(chat_id=chat_id, text="RDP tunnel stopped")
+        #     if not (
+        #         str(chat_id).startswith(self.admin_chat_id)
+        #         and str(chat_id).endswith(self.admin_chat_id)
+        #     ):
+        #         await context.bot.send_message(
+        #             chat_id=self.admin_chat_id,
+        #             text=f"""RDP tunnel stopped by {first_name} {last_name}""",
+        #         )
+        #     return "RDP tunnel stopped"
+        # elif self.video_state:
+        #     await context.bot.send_message(
+        #         chat_id=chat_id,
+        #         text="Cannot start RDP tunnel as other video feed is running on the server",
+        #     )
+        #     return (
+        #         "Cannot start RDP tunnel as other video feed is running on the server"
+        #     )
+        # elif self.screen_state:
+        #     await context.bot.send_message(
+        #         chat_id=chat_id,
+        #         text="Cannot start RDP tunnel as other screen feed is running on the server",
+        #     )
+        #     return (
+        #         "Cannot start RDP tunnel as other screen feed is running on the server"
+        #     )
+        # ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
+        # ngrok.u
+
+        # self.rdp_active = True
+        # # Get tunnel information
+        # tunnel_domain = ngrok_tunnel.public_url.split("/")[2].split(":")[0]
+        # # get ip address from domain:port
+        # print(ngrok_tunnel.public_url.split("/"))
+        # tunnel_ip = socket.gethostbyname(tunnel_domain)
+        # tunnel_port = ngrok_tunnel.public_url.split(":")[2]
+        # await context.bot.send_message(
+        #     chat_id=chat_id,
+        #     text=f'''RDP tunnel started at `{tunnel_ip}:{tunnel_port}`
+        #     Or visit `{ngrok_tunnel.public_url.split("://")[1]}`''',
+        #     parse_mode="MarkdownV2",
+        # )
+        # if not (
+        #     str(chat_id).startswith(self.admin_chat_id)
+        #     and str(chat_id).endswith(self.admin_chat_id)
+        # ):
+        #     await context.bot.send_message(
+        #         chat_id=self.admin_chat_id,
+        #         text=f"""RDP tunnel started by {first_name} {last_name}
+        #         Or visit `{ngrok_tunnel.public_url.split("://")[1]}`""",
+        #     )
+        # return f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`"
+        if not self.rdp_active:
+            _, msg = self.frpc.start()
+            print(msg)
+            await context.bot.send_message(
+                chat_id=chat_id, text=msg, parse_mode="MarkdownV2"
+            )
+            self.rdp_active = True
+            return msg
+        else:
+            _, msg = self.frpc.stop()
+            print(msg)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=msg,
+            )
             self.rdp_active = False
-            await context.bot.send_message(chat_id=chat_id, text="RDP tunnel stopped")
-            if not (
-                str(chat_id).startswith(self.admin_chat_id)
-                and str(chat_id).endswith(self.admin_chat_id)
-            ):
-                await context.bot.send_message(
-                    chat_id=self.admin_chat_id,
-                    text=f"""RDP tunnel stopped by {first_name} {last_name}""",
-                )
-            return "RDP tunnel stopped"
-        elif self.video_state:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Cannot start RDP tunnel as other video feed is running on the server",
-            )
-            return (
-                "Cannot start RDP tunnel as other video feed is running on the server"
-            )
-        elif self.screen_state:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Cannot start RDP tunnel as other screen feed is running on the server",
-            )
-            return (
-                "Cannot start RDP tunnel as other screen feed is running on the server"
-            )
-        ngrok_tunnel = ngrok.connect(self.rdp_port, "tcp")
+            return msg
 
-        self.rdp_active = True
-        # Get tunnel information
-        tunnel_domain = ngrok_tunnel.public_url.split("/")[2].split(":")[0]
-        # get ip address from domain:port
-        print(ngrok_tunnel.public_url.split("/"))
-        tunnel_ip = socket.gethostbyname(tunnel_domain)
-        tunnel_port = ngrok_tunnel.public_url.split(":")[2]
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`",
-            parse_mode="MarkdownV2",
-        )
-        if not (
-            str(chat_id).startswith(self.admin_chat_id)
-            and str(chat_id).endswith(self.admin_chat_id)
-        ):
-            await context.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=f"""RDP tunnel started by {first_name} {last_name}""",
-            )
-        return f"RDP tunnel started at `{tunnel_ip}:{tunnel_port}`"
-
+    @llm_tool(
+        "clear_history", "Clear the chat history", return_msg="Chat history cleared"
+    )
+    @command("clear_history", confirmation="")
     async def clear_history(
         self, chat_id, command, list_command, first_name, last_name, context
     ):

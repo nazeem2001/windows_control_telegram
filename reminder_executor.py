@@ -1,11 +1,10 @@
 import os
 from subprocess import Popen, PIPE
-from types import SimpleNamespace
 from reminder_db import delete_reminder, get_reminder_by_id
 
 
 def _build_context(feature):
-    return SimpleNamespace(bot=feature.telegram_bot)
+    return feature.transport.make_context()
 
 
 async def execute_reminder(feature, reminder_id: str):
@@ -17,7 +16,7 @@ async def execute_reminder(feature, reminder_id: str):
         if reminder.ai:
             context = _build_context(feature)
             feature.set_chat_mode(reminder.chat_id, "ai")
-            profile = await feature.telegram_bot.get_chat(chat_id=reminder.chat_id)
+            profile = await feature.transport.get_chat(reminder.chat_id)
             reminder_message = f">{reminder.message}"
             await feature.execute_chat_command_async(
                 reminder.chat_id,
@@ -32,9 +31,9 @@ async def execute_reminder(feature, reminder_id: str):
 
         else:
             if reminder.action_type == "send_message":
-                await feature.telegram_bot.send_message(
-                    chat_id=reminder.chat_id,
-                    text=reminder.message,
+                await feature.transport.send_message(
+                    reminder.chat_id,
+                    reminder.message,
                 )
                 print(
                     f"Sent reminder {reminder.id} to chat {reminder.chat_id}: {reminder.message}"
@@ -42,9 +41,9 @@ async def execute_reminder(feature, reminder_id: str):
             elif reminder.action_type == "run_command":
                 command = reminder.action_params.get("command", "")
                 if not command:
-                    await feature.telegram_bot.send_message(
-                        chat_id=reminder.chat_id,
-                        text=f"Reminder {reminder.id} executed, but no command was defined.",
+                    await feature.transport.send_message(
+                        reminder.chat_id,
+                        f"Reminder {reminder.id} executed, but no command was defined.",
                     )
                     print(f"Reminder {reminder.id} had no command.")
                 else:
@@ -68,17 +67,17 @@ async def execute_reminder(feature, reminder_id: str):
                         )
                         stdout, stderr = process.communicate()
                         if process.returncode != 0:
-                            await feature.telegram_bot.send_message(
-                                chat_id=reminder.chat_id,
-                                text=f"Scheduled command failed: {stderr.strip()}",
+                            await feature.transport.send_message(
+                                reminder.chat_id,
+                                f"Scheduled command failed: {stderr.strip()}",
                             )
                             print(
                                 f"Scheduled command failed for reminder {reminder.id}: {stderr.strip()}"
                             )
                         else:
-                            await feature.telegram_bot.send_message(
-                                chat_id=reminder.chat_id,
-                                text=stdout.strip()
+                            await feature.transport.send_message(
+                                reminder.chat_id,
+                                stdout.strip()
                                 or f"Scheduled command '{command}' executed.",
                             )
                             print(
