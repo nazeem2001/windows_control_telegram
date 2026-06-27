@@ -1,52 +1,51 @@
 # Windows Command Telegram Bot
 
-A comprehensive Telegram bot for remote system control with AI-powered assistance using LangChain and Ollama.
+A remote-control bot for Windows that can be driven from Telegram or Discord, with optional AI assistance via LangChain and Ollama.
 
 ## Overview
 
-This project integrates a Telegram bot with intelligent AI capabilities (powered by gemma 4 via Ollama) to provide remote system control, automation, and interactive features. The bot supports both text-based and text-to-speech (TTS) modes with tool integration for system operations.
+This project combines a bot backend with local system tools so you can control a Windows machine remotely. It supports:
 
-## Features Summary
+- Telegram and Discord transports
+- AI chat mode with Ollama and LangChain
+- Rule-based command mode with NLP confirmation
+- Screen and webcam streaming, screenshots, keyboard input, and terminal execution
+- Reminder scheduling and execution
+- Authorized-user management and logging
+- Optional tunnel support through ngrok or FRP
 
-- **AI-Powered Assistant**: Uses gemma 4 for intelligent command understanding and execution
-- **Bidirectional Tool Control**: System webcam, screen capture, keyboard input, and terminal commands
-- **Remote Desktop Access**: Secure RDP tunnel setup
-- **File Transfer**: Send and receive files
-- **Audio Generation**: Text-to-speech with customizable parameters
-- **Command Classification**: ML-based intelligent command recognition
-- **Multi-Mode Operation**: Support for AI and rule-based modes
-- **Reminder Scheduling**: Natural language reminder creation and automated execution
-- **Authorization Management**: Whitelist-based user authorization
-- **Comprehensive Logging**: Full command and activity logs
+## Features
+
+- AI-powered command handling in `/ai` mode
+- Rule-based command execution in `/non_ai` mode
+- Cross-platform messaging through Telegram and Discord
+- File transfer and basic system interaction helpers
+- Optional text-to-speech and media handling when the required tools are available
+- Reminder creation using natural language
+- FRP tunnel control via the `rdp` and `frpip` commands
+- Authorization checks and admin-only actions
 
 ## Installation
 
-1. Install required dependencies:
+1. Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This project now includes reminder scheduling support, and `requirements.txt` includes `APScheduler` for background reminder execution.
-
-If you enable the chat bot feature by setting `CHAT_BOT_ENABLED=True` in your `.env`, you must also install the AI/model requirements:
+2. If you want AI chat features, install the additional model dependencies:
 
 ```bash
 pip install -r ai-requirements.txt
 ```
 
-2. Install Ollama (if you plan to use the local Llama models)
-
-Follow the platform-specific installer instructions at the Ollama docs, then pull the model:
+3. Install Ollama and pull the model used by the bot:
 
 ```bash
 ollama pull gemma4
 ```
 
-3. Install and configure ngrok (for public tunnels)
-
-- Install ngrok from the official site and set your `NGROK_TOKEN` environment variable.
-- Add `NGROK_TOKEN` (and other settings) to a `.env` file by copying the example:
+4. Create your environment file:
 
 Windows:
 
@@ -60,14 +59,17 @@ Linux / macOS:
 cp env.example .env
 ```
 
-Edit `.env` and set `API_KEY`, `ADMIN_CHAT_ID`, `NGROK_TOKEN`, and other values.
+Then edit `.env` and set values such as:
 
-4. Ensure platform tools are available
+- `API_KEY`
+- `ADMIN_CHAT_ID`
+- `ADMIN_NAME`
+- `NGROK_TOKEN`
+- `DISCORD_TOKEN` (optional for Discord support)
+- `CHAT_BOT_ENABLED`
+- `FFMPEG_PATH_PREFIX` (optional)
 
-- Install FFmpeg and set `FFMPEG_PATH_PREFIX` in `.env` if using TTS or audio features.
-- On Windows, running RDP-related features may require administrator privileges.
-
-5. Run the bot
+5. Run the bot:
 
 ```bash
 python main.py
@@ -220,54 +222,34 @@ This approach balances automation with safety, catching potential misunderstandi
   - `nlp`: Toggle NLP processing mode
   - `clear_history`: Clear chat history
 
-## Auto-Start Configuration (Windows)
+## Tunnels and Remote Access
 
-### Steps to Auto-Start:
+The bot can expose local services through tunneling tools:
 
-1. Create a `.bat` file (e.g., `lanchBot.bat`):
-
-```batch
-@echo off
-cls
-python main.py>>./tele_bot_log/logs.txt
-exit
-```
-
-2. Create a `.vbs` file (e.g., `lanchBot.vbs`):
-
-```vbscript
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run chr(34) & "lanchBot.bat" & Chr(34), 0
-Set WshShell = Nothing
-```
-
-3. Copy the `.vbs` file shortcut to:
-   ```
-   C:\Users\<username>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
-   ```
-
-## Configuration
-
-- **Environment Variables**: Copy `env.example` to `.env` and configure your Telegram token and settings
-- **Ollama Model**: Configured to use gemma 4 (see `chains.py`)
-- **Device Detection**: Automatically uses CUDA if available, otherwise CPU
-- **Authorized Users**: Stored in `authorzed_Users/authorzed_Users.json`
+- `ngrok` for streaming and remote access helpers
+- `FRP` via the built-in `frpc` wrapper for tunnel management
 
 ## Project Structure
 
-- `main.py`: Entry point
-- `chains.py`: LangChain agent setup and TTS generation
-- `tool_config.py`: Tool definitions
-- `tool_adaptor.py`: Tool execution bridge
-- `features.py`: Feature management
-- `trainer.py`: ML classifier for command recognition
-- `logger.py`: Logging utilities
-- `reminder_db.py`: Reminder data storage and retrieval
-- `reminder_parser.py`: Natural language reminder parsing
-- `reminder_executor.py`: Reminder execution and action dispatch
-- `scheduler_manager.py`: APScheduler-based scheduling manager
-- `templates/`: HTML templates for web interface
-- `models/`: Context and configuration models
-- `adaptors/`: Tool adapters
-- `downloads/`: Generated files (audio, etc.)
-- `tele_bot_log/`: Bot logs
+- `main.py` — entry point and bot startup
+- `features.py` — command handling, auth checks, reminders, and tunnel logic
+- `telegram_transport.py` — Telegram messaging adapter
+- `discord_transport.py` — Discord messaging adapter
+- `transport.py` — shared transport interface
+- `chains.py` — LangChain and AI integration
+- `tool_config.py` — tool definitions and command handlers
+- `trainer.py` — NLP classification model
+- `reminder_*.py` — reminder parsing, storage, and execution
+- `scheduler_manager.py` — reminder scheduling
+- `templates/` — HTML templates for the web UI
+- `downloads/` — generated media and output files
+- `tele_bot_log/` — runtime logs
+
+## Auto-Start on Windows
+
+You can use the provided startup scripts to launch the bot automatically on login:
+
+- `lanchBot.bat`
+- `lanchBot.vbs`
+
+Copy the `.vbs` shortcut to the Windows Startup folder to enable automatic startup.
