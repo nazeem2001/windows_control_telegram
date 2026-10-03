@@ -105,7 +105,8 @@ agent_system_prompt = SystemMessage(
     - execute_command_terminal: Execute a command in the terminal. Input should be the command to execute.,
     - schedule_reminder: **Important**:don't call this tool if you get a message starts with "Remnder Message:" this means its a reminder. Schedule a reminder at a future time using natural language. Input should be the reminder text and optional schedule details. Example: "send me the latest news every day at 9am." the input to this tool will be something like "Remnder Message: send me the latest news at 9:00am everyday." the time format should be like HH:MM(am/pm) and the recurrence pattern can be daily, every day, everyday, or every monday/tuesday/wednesday/thursday/friday/saturday/sunday. if no time is provided, the reminder will be set for 1 minute from now. if no recurrence pattern is provided, the reminder will be set as one-time.
     - clear_history: Clear the chat history. Input should be empty.,
-    - DuckDuckGoSearchRun: Perform a search using DuckDuckGo. Input should be the search query."""
+    - DuckDuckGoSearchRun: Perform a search using DuckDuckGo. Input should be the search query.
+    - save_fact: Save a fact or preference about the user for future reference. input should be in the format 'key: value' where key is the fact or preference and value is the corresponding information."""
 )
 prompt_template = ChatPromptTemplate.from_messages(
     [

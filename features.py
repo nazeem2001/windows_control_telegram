@@ -25,6 +25,7 @@ import uuid
 from reminder_db import Reminder
 from reminder_parser import parse_reminder_input
 from reminder_executor import execute_reminder
+from memories_manager import UserMemory
 from transport import TransportAdapter
 from telegram import (
     InlineKeyboardMarkup,
@@ -234,6 +235,7 @@ class Features:
         self.screen_state = False
         self.video_state = False
         self.chat_history = {}  # Dictionary to store chat history
+        self.memory = UserMemory()
         self.no_nlp = {}  # Dictionary to store no NLP flag per chat
         self.chat_mode = {}  # Dictionary to store chat modes
         self.nlp_classifier_output = {}  # Dictionary to store NLP classifier outputut
@@ -357,7 +359,7 @@ class Features:
             messag = Popen(
                 "ipconfig", shell=True, stdout=PIPE, text=True
             ).communicate()[0]
-            
+
             try:
                 await self.transport.send_message(
                     chat_id=self.admin_chat_id,
@@ -1104,6 +1106,32 @@ here is log""",
             list: The chat history for the given chat_id.
         """
         return self.chat_history.get(chat_id, [])
+    @llm_tool(
+        "save_fact",
+        "Save a fact or preference about the user for future reference. input should be in the format 'key: value' where key is the fact or preference and value is the corresponding information.",
+        args_map={"text": "text"},
+        return_msg="Text typed",
+    )
+    def save_user_memory_message(  self,
+        chat_id,
+        command,
+        list_command,
+        first_name,
+        last_name,
+        context,):
+        print(f"Saving user memory for chat_id: {chat_id}, command: {command}, first_name: {first_name}")
+        if not command:
+            return []
+        self.memory.ensure_user_folder(chat_id, first_name)
+        self.memory.add_fact(chat_id, command, first_name=first_name)
+
+    def _memory_context(self, chat_id, query):
+        facts = self.memory.retrieve_relevant_facts(chat_id, query, top_k=5)
+        if not facts:
+            return ""
+        lines = ["Relevant user facts and preferences:"]
+        lines.extend(f"- {fact['key']}: {fact['value']}" for fact in facts)
+        return "\n\n" + "\n".join(lines)
 
     def get_chat_mode(self, chat_id):
         """
@@ -1157,7 +1185,8 @@ here is log""",
                 text=self._commmand_confrimation_msg[
                     self.nlp_model.classes_.tolist()[predictons.argmax()]
                 ],
-                reply_markup=self.keyboard, feature_instance=self,
+                reply_markup=self.keyboard,
+                feature_instance=self,
             )
         else:
             await self.command_handlers[
@@ -1314,6 +1343,7 @@ here is log""",
         system_status = await self.get_system_status(
             chat_id, command, list_command, first_name, last_name, context, True
         )
+        system_status += self._memory_context(chat_id, command)
         tool_ctx = ToolContext(chat_id, first_name, last_name, context)
         chat_history = []
         if len(self.get_chat_history(chat_id)) == 0:
@@ -1345,6 +1375,12 @@ here is log""",
                 self.record_message(chat_id, agent_response["response"]["messages"])
             await context.bot.send_message(
                 chat_id=chat_id, text=response, parse_mode="Markdown"
+            )
+            self.memory.save_conversation(
+                chat_id, "user", command, first_name=first_name
+            )
+            self.memory.save_conversation(
+                chat_id, "Bot", response, first_name=first_name
             )
         else:
             print("Generating audio response...")
@@ -1427,6 +1463,9 @@ here is log""",
                 self.clear_history_flag[chat_id] = False
             else:
                 self.record_message(chat_id, agent_response["response"]["messages"])
+            self.memory.save_conversation(
+                chat_id, "Bot", response, first_name=first_name
+            )
 
     def escape_markdown_v2(self, text):
         """
@@ -1669,3 +1708,85 @@ here is log""",
         self.clear_history_flag[chat_id] = True
         await context.bot.send_message(chat_id=chat_id, text="Chat history cleared")
         return "Chat history cleared"
+
+    @command("memory", confirmation="")
+    async def show_memory(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        data = self.memory.load_memory(chat_id)
+        facts = data["facts"]
+        if facts:
+            fact_lines = [f"- {key}: {value}" for key, value in facts.items()]
+        else:
+            fact_lines = ["No facts saved yet."]
+        stats = data["metadata"]
+        message = (
+            "Memory\n"
+            + "\n".join(fact_lines)
+            + f"\n\nConversation entries: {stats['conversation_count']}"
+            + f"\nMemory size: {stats['memory_size']} bytes"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        return message
+
+    @command("remember", confirmation="")
+    async def remember_fact(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        fact = command[len(list_command[0]) :].strip()
+        if not fact:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Tell me what to remember."
+            )
+            return "No fact provided"
+        key = self.memory.add_fact(chat_id, fact, first_name=first_name)
+        self.memory.save_conversation(
+            chat_id, "User", f"[Command] remember {fact}", first_name=first_name
+        )
+        message = f"Remembered: {key}"
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        return message
+
+    @command("forget", confirmation="")
+    async def forget_fact(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        fact_key = command[len(list_command[0]) :].strip()
+        if not fact_key:
+            await context.bot.send_message(
+                chat_id=chat_id, text="Tell me what to forget."
+            )
+            return "No fact key provided"
+        removed = self.memory.remove_fact(chat_id, fact_key)
+        message = (
+            f"Forgot: {removed}" if removed else f"No saved fact matched: {fact_key}"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        return message
+
+    @command("memory_stats", confirmation="")
+    async def memory_stats(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        stats = self.memory.get_stats(chat_id)
+        message = (
+            f"Facts: {stats['facts_count']}\n"
+            f"Conversation entries: {stats['conversation_count']}\n"
+            f"Memory size: {stats['memory_size']} bytes\n"
+            f"Retrieval: {stats['embedding_backend']}"
+        )
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        return message
+
+    @command("clear_memory", confirmation="")
+    async def clear_memory(
+        self, chat_id, command, list_command, first_name, last_name, context
+    ):
+        if len(list_command) < 2 or list_command[1].lower() != "confirm":
+            message = "Send `clear_memory confirm` to delete your saved memory."
+            await context.bot.send_message(chat_id=chat_id, text=message)
+            return message
+        self.memory.clear_memory(chat_id)
+        message = "Memory cleared."
+        await context.bot.send_message(chat_id=chat_id, text=message)
+        return message
