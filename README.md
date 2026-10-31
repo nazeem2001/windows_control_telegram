@@ -23,6 +23,7 @@ This project combines a bot backend with local system tools so you can control a
 - Optional text-to-speech and media handling when the required tools are available
 - Reminder creation using natural language
 - FRP tunnel control via the `rdp` and `frpip` commands
+- Runtime MCP server connections over stdio or Streamable HTTP
 - Authorization checks and admin-only actions
 
 ## Installation
@@ -66,6 +67,7 @@ Then edit `.env` and set values such as:
 - `ADMIN_NAME`
 - `NGROK_TOKEN`
 - `DISCORD_TOKEN` (optional for Discord support)
+- `DC_ADMIN_CHAT_ID` (Discord channel ID allowed to manage MCP servers)
 - `CHAT_BOT_ENABLED`
 - `FFMPEG_PATH_PREFIX` (optional)
 
@@ -95,6 +97,7 @@ Troubleshooting
 - **reminder_parser.py**: Natural language reminder parsing
 - **reminder_executor.py**: Executing scheduled reminders and actions
 - **scheduler_manager.py**: APScheduler-based reminder scheduling
+- **mcp_manager.py**: Runtime MCP registry, stdio/HTTP sessions, and tool invocation
 
 ### Available Tools/Commands
 
@@ -113,6 +116,28 @@ The AI agent has access to the following tools:
 - **Web Search**: DuckDuckGo search integration for information retrieval
 
 ## Operating Modes
+
+### Runtime MCP Servers
+
+MCP server management is admin-only. Connected server tools are registered as LangChain tools for the AI agent and can be selected by the model during AI conversations. There is no separate command for manually invoking an MCP tool.
+
+Create an MCP server definition as JSON and send it with `>add_mcp`. For a stdio server:
+
+```text
+>add_mcp {"alias":"filesystem","transport":"stdio","package_manager":"npx","package":"@modelcontextprotocol/server-filesystem","args":["C:\\shared"]}
+```
+
+For a remote Streamable HTTP server, use a public HTTPS URL. Put its bearer token in an environment variable named in the server definition:
+
+```text
+>add_mcp {"alias":"docs","transport":"http","url":"https://mcp.example.com/mcp","token_env":"DOCS_MCP_TOKEN"}
+```
+
+The bot asks for a one-time confirmation before connecting; confirm within five minutes using the supplied `>add_mcp confirm <code>` command. Stdio definitions support `npx` and `uvx`; `uvx` also requires an `entrypoint`. Install Node.js/npm (`npx`) or uv (`uvx`) on the bot host and make the runner available on `PATH`. Optional process environment values are supplied as references, for example `"env":{"API_KEY":"DOCS_API_KEY"}`. Define those referenced variables in the bot's environment or `.env` file.
+
+In AI mode, ask naturally for the task. LangChain exposes tools from connected MCP servers to the model, using the server alias and tool description to distinguish them. MCP tool calls are made by the agent, not through a separate user-facing tool-call command. Admins can use `>mcp list`, `>remove_mcp <alias>`, or `>mcp reconnect <alias>` to manage registered servers. The mutable definitions are stored in `mcp_servers.json` and are not committed.
+
+Only HTTPS endpoints that resolve to public IP addresses are accepted. URL credentials, query strings, and fragments are rejected; bearer credentials must come from environment variables. Adding a stdio package downloads and executes third-party code on the bot host, so only install packages you trust. Admin confirmation is not process sandboxing.
 
 ### AI Chat Mode (`/ai`)
 

@@ -1,8 +1,35 @@
 import time
 import inspect
-from langchain_core.tools import tool
+import hashlib
+import re
+from langchain_core.tools import StructuredTool, tool
 from adaptors.tool_adaptor import execute_llm_tool
 from langchain_community.tools import DuckDuckGoSearchRun, DuckDuckGoSearchResults
+
+
+def make_mcp_tool(feature, server_alias, mcp_tool):
+    remote_tool_name = mcp_tool.name
+    safe_name = re.sub(
+        r"[^a-zA-Z0-9_-]+", "_", f"{server_alias}_{remote_tool_name}"
+    ).strip("_")[:48].lower()
+    name_digest = hashlib.sha256(
+        f"{server_alias}:{remote_tool_name}".encode("utf-8")
+    ).hexdigest()[:8]
+
+    async def invoke_mcp_tool(**arguments):
+        return await feature.mcp_manager.call_tool(
+            server_alias, remote_tool_name, arguments
+        )
+
+    return StructuredTool.from_function(
+        coroutine=invoke_mcp_tool,
+        name=f"mcp_server_{safe_name}_{name_digest}",
+        description=(
+            f"MCP server '{server_alias}', tool '{remote_tool_name}'. "
+            f"{mcp_tool.description or 'No description provided.'}"
+        ),
+        args_schema=mcp_tool.input_schema,
+    )
 
 
 def build_tools(feature, tool_ctx):
@@ -40,6 +67,11 @@ def build_tools(feature, tool_ctx):
 
     # Generate tools from LLM configs
     tools = [make_tool(cfg) for cfg in type(feature)._tool_configs]
+
+    tools.extend(
+        make_mcp_tool(feature, server_alias, mcp_tool)
+        for server_alias, mcp_tool in feature.mcp_manager.connected_tools()
+    )
 
     # Special tools with unique logic
     @tool

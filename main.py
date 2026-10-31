@@ -339,6 +339,11 @@ async def _run_discord(feature, client, discord_token):
 
 async def start_bot():
     """Start the bot"""
+    try:
+        await feature.mcp_manager.load()
+    except Exception as e:
+        print(f"[MCP] Could not load server registry: {e}")
+
     # Add handlers
     app.add_handler(
         MessageHandler(
@@ -381,7 +386,10 @@ async def start_bot():
         while True:
             await asyncio.sleep(1)
     finally:
-        scheduler.shutdown()
+        try:
+            await feature.mcp_manager.close()
+        finally:
+            scheduler.shutdown()
 
 
 def signal_handler(sig, frame):

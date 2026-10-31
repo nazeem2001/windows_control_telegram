@@ -26,6 +26,14 @@ from reminder_db import Reminder
 from reminder_parser import parse_reminder_input
 from reminder_executor import execute_reminder
 from transport import TransportAdapter
+from mcp_manager import (
+    MCPConfigError,
+    MCPManager,
+    is_admin_chat_id,
+    normalize_server_config,
+)
+
+_MCP_ADMIN_ONLY_MESSAGE = "Only the configured admin can manage MCP servers."
 from telegram import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -90,10 +98,11 @@ class FrpcWrapper:
 # Module-level dictionaries and decorator for command registration
 _command_handlers = {}
 _confirmation_messages = {}
+_mcp_command_names = set()
 _tool_configs = []
 
 
-def command(name, confirmation=None):
+def command(name, confirmation=None, mcp=False):
     """
     Decorator to register a command handler method under the given command name.
 
@@ -107,6 +116,8 @@ def command(name, confirmation=None):
 
     def decorator(func):
         _command_handlers[name] = func
+        if mcp:
+            _mcp_command_names.add(name)
         if confirmation:
             _confirmation_messages[name] = confirmation
         return func
@@ -171,6 +182,7 @@ class Features:
 
     command_handlers = _command_handlers
     confirmation_messages = _confirmation_messages
+    mcp_command_names = _mcp_command_names
     _tool_configs = _tool_configs
 
     def __init__(
@@ -229,6 +241,8 @@ class Features:
         self.telegram_bot = telegram_bot
         self.transport = transport
         self.dc_transport = dc_transport
+        self.mcp_manager = MCPManager()
+        self.pending_mcp_installs = {}
         self.scheduler_manager = None
         file_found = False
         self.screen_state = False
@@ -1164,6 +1178,148 @@ here is log""",
                 self.nlp_model.classes_.tolist()[predictons.argmax()]
             ](chat_id, command, list_command, first_name, last_name, context)
 
+    def _is_mcp_admin_chat(self, chat_id):
+        return is_admin_chat_id(
+            chat_id, self.admin_chat_id, self.dc_admin_chat_id
+        )
+
+    @command("mcp", mcp=True)
+    @command("add_mcp", mcp=True)
+    @command("remove_mcp", mcp=True)
+    async def _handle_mcp_command(
+        self, chat_id, command, list_command, _first_name, _last_name, context
+    ):
+        command_name = list_command[0].lower()
+        action = list_command[1].lower() if len(list_command) > 1 else ""
+        if self._mcp_command_requires_admin(command_name, action) and not self._is_mcp_admin_chat(chat_id):
+            await context.bot.send_message(
+                chat_id=chat_id, text=_MCP_ADMIN_ONLY_MESSAGE
+            )
+            return
+
+        try:
+            if command_name == "add_mcp":
+                await self._handle_add_mcp(chat_id, command, list_command, context)
+            elif command_name == "remove_mcp":
+                await self._handle_remove_mcp(chat_id, list_command, context)
+            else:
+                await self._handle_mcp_action(chat_id, command, context)
+        except (MCPConfigError, json.JSONDecodeError) as error:
+            await context.bot.send_message(chat_id=chat_id, text=f"MCP error: {error}")
+        except Exception as error:
+            print(f"[MCP] Command failed: {error}")
+            await context.bot.send_message(
+                chat_id=chat_id, text="MCP operation failed. Check the bot log for details."
+            )
+
+    @staticmethod
+    def _mcp_command_requires_admin(command_name, action):
+        return command_name in {"add_mcp", "remove_mcp"} or (
+            command_name == "mcp" and action in {"remove", "reconnect"}
+        )
+
+    async def _handle_add_mcp(self, chat_id, command, list_command, context):
+        remainder = command[len(list_command[0]):].strip()
+        if not remainder:
+            raise MCPConfigError(
+                'Usage: add_mcp {"alias":"...","transport":"stdio|http",...}'
+            )
+        arguments = remainder.split(maxsplit=1)
+        if arguments[0].lower() == "confirm":
+            await self._confirm_mcp_install(chat_id, arguments, context)
+            return
+
+        config = await asyncio.to_thread(
+            normalize_server_config,
+            json.loads(remainder),
+            self.mcp_manager.resolver,
+        )
+        if config["alias"] in self.mcp_manager.servers:
+            raise MCPConfigError(f"MCP alias '{config['alias']}' is already registered.")
+        code = secrets.token_urlsafe(6)
+        self.pending_mcp_installs[str(chat_id)] = {
+            "config": config,
+            "code": code,
+            "expires_at": time.monotonic() + 300,
+        }
+        details = self._mcp_install_details(config)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"Ready to install MCP server '{config['alias']}' ({details}). "
+                f"Confirm within 5 minutes with: >add_mcp confirm {code}"
+            ),
+        )
+
+    async def _confirm_mcp_install(self, chat_id, arguments, context):
+        pending_key = str(chat_id)
+        if len(arguments) != 2:
+            raise MCPConfigError("Usage: add_mcp confirm <confirmation-code>")
+        pending = self.pending_mcp_installs.get(pending_key)
+        if (
+            not pending
+            or pending["expires_at"] < time.monotonic()
+            or not secrets.compare_digest(pending["code"], arguments[1])
+        ):
+            self.pending_mcp_installs.pop(pending_key, None)
+            raise MCPConfigError("That MCP confirmation is invalid or expired.")
+        await self.mcp_manager.add(pending["config"])
+        self.pending_mcp_installs.pop(pending_key, None)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"MCP server '{pending['config']['alias']}' connected and installed.",
+        )
+
+    @staticmethod
+    def _mcp_install_details(config):
+        if config["transport"] == "stdio":
+            return (
+                f"stdio package {config['package_manager']}:{config['package']}. "
+                "This downloads and executes third-party code on this host."
+            )
+        return f"HTTPS endpoint {config['url']}"
+
+    async def _handle_remove_mcp(self, chat_id, list_command, context):
+        if len(list_command) != 2:
+            raise MCPConfigError("Usage: remove_mcp <alias>")
+        await self.mcp_manager.remove(list_command[1])
+        await context.bot.send_message(
+            chat_id=chat_id, text=f"MCP server '{list_command[1]}' removed."
+        )
+
+    async def _handle_mcp_action(self, chat_id, command, context):
+        parts = command.split(maxsplit=4)
+        if len(parts) < 2:
+            raise MCPConfigError("Usage: mcp list | mcp remove <alias> | mcp reconnect <alias>")
+        action = parts[1].lower()
+        if action == "list":
+            response = self._mcp_server_list()
+        elif action in {"remove", "reconnect"} and len(parts) == 3:
+            response = await self._mcp_admin_action(action, parts[2])
+        else:
+            raise MCPConfigError(
+                "Usage: mcp list | mcp remove <alias> | mcp reconnect <alias>"
+            )
+        await context.bot.send_message(chat_id=chat_id, text=response[:1800])
+
+    def _mcp_server_list(self):
+        servers = self.mcp_manager.list_servers()
+        if not servers:
+            return "No MCP servers are installed."
+        return "\n".join(
+            f"{item['alias']} ({item['transport']}, "
+            f"{'connected' if item['connected'] else 'disconnected'}): "
+            f"{', '.join(item['tools']) or 'no tools'}"
+            for item in servers
+        )
+
+    async def _mcp_admin_action(self, action, alias):
+        if action == "remove":
+            await self.mcp_manager.remove(alias)
+            return f"MCP server '{alias}' removed."
+        await self.mcp_manager.reconnect(alias)
+        return f"MCP server '{alias}' reconnected."
+
     async def execute_chat_command_async(
         self,
         chat_id,
@@ -1203,13 +1359,17 @@ here is log""",
             list_command = [self.reply_keyboard_to_commad[command]]
             command = self.reply_keyboard_to_commad[command]
             reply = True
+        cmd = list_command[0].lower()
+        if cmd in self.mcp_command_names:
+            await self.command_handlers[cmd](
+                chat_id, command, list_command, first_name, last_name, context
+            )
+            return
         if not reply:
             await self.retrieve_command_predictions_async(
                 chat_id, command, list_command, first_name, last_name, context
             )
             return
-        cmd = list_command[0].lower()
-
         if self.chat_mode.get(chat_id) == "ai":
             await self.command_handlers["chat"](
                 chat_id,
